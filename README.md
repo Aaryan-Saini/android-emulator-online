@@ -39,7 +39,7 @@ Open [localhost:3000](http://localhost:3000), upload an `.apk`, and the app open
 
 `npm start` runs the server under a small watcher that restarts it if it ever stops. Phones keep running while the server restarts, so open sessions carry on. To shut everything down, stop the server (<kbd>Ctrl</kbd>+<kbd>C</kbd>) and run `npm run stop-phones`. Setup does not touch your other emulator profiles.
 
-`npm run setup -- --force` rebuilds the snapshot from scratch (stop the server first). Setup tries to draw the phone screen with your graphics card. If that crashes or isn't available it falls back to software rendering at 720×1600, which keeps apps' layout identical (411×914 dp) but halves the CPU work. Force a mode with `--gpu=host` or `--gpu=swiftshader`. The choice is saved in `data/emulator.json`.
+`npm run setup -- --force` rebuilds the snapshot from scratch (stop the server first). Setup tries to draw the phone screen with your graphics card. If that crashes or isn't available it falls back to software rendering at 720×1600, which keeps apps' layout identical (411×914 dp) but halves the CPU work. Force a mode with `--gpu=host`, `--gpu=swiftshader` or `--gpu=swangle` (ANGLE on SwiftShader's Vulkan engine; setup checks the phone really uses it, and refuses if the emulator falls back, as emulator 36.5 on Windows does). `--avd=<name>` builds into a separate emulator profile, so the graphics mode can be changed while phones are running; the server switches to it on its next restart and replaces the waiting spare. The choice is saved in `data/emulator.json`.
 
 ## How it works
 
@@ -109,7 +109,7 @@ All optional, as environment variables:
 
 ## When a phone crashes
 
-The session moves to a fresh phone with the same app (a few seconds), and the crash is written to `data/logs/crashes.log` with Windows' crash record. To also see *where* in the emulator it crashed, let Windows keep a small crash dump: run this once from a PowerShell window opened as administrator:
+The session moves to a fresh phone with the same app (a few seconds), and the crash is written to `data/logs/crashes.log` with Windows' crash record. Crashes seen so far happen inside the code SwiftShader (the software renderer) generates while apps draw; with software rendering, emulator 36.5 always uses that renderer for OpenGL ES. To also see *where* in the emulator it crashed, let Windows keep a small crash dump: run this once from a PowerShell window opened as administrator:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\enable-crash-dumps.ps1   # add -Off to undo

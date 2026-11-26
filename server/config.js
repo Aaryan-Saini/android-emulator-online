@@ -73,7 +73,7 @@ module.exports = {
   SCRCPY_VERSION: env('SCRCPY_VERSION', '5.0.1'),
 
   // The emulator profile and clean snapshot every session starts from (created by `npm run setup`).
-  AVD: env('HANDSET_AVD', 'handset-base'),
+  AVD: env('HANDSET_AVD', emulatorMode.avd || 'handset-base'),
   SNAPSHOT: env('HANDSET_SNAPSHOT', 'handset_clean'),
   EMULATOR_FILE,
   emulatorMode,

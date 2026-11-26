@@ -14,8 +14,11 @@ const { run, sleep } = require('../server/util');
 const args = process.argv.slice(2);
 const force = args.includes('--force');
 const gpuArg = (args.find((a) => a.startsWith('--gpu=')) || '').slice(6);
+// --avd=<name>: build into another emulator profile, e.g. to switch graphics mode while phones are running from
+// the current one (a snapshot must not be replaced under running phones). The server uses it after a restart.
+const AVD = (args.find((a) => a.startsWith('--avd=')) || '').slice(6) || cfg.AVD;
 const AVD_HOME = process.env.ANDROID_AVD_HOME || path.join(os.homedir(), '.android', 'avd');
-const avdDir = path.join(AVD_HOME, `${cfg.AVD}.avd`);
+const avdDir = path.join(AVD_HOME, `${AVD}.avd`);
 const PORT = 5598;
 const serial = `emulator-${PORT}`;
 
@@ -23,6 +26,10 @@ const serial = `emulator-${PORT}`;
 const MODES = {
   host: { gpu: 'host', window: 'hidden', features: '-Vulkan', lcd: { w: 1080, h: 2400, dpi: 420 } },
   swiftshader: { gpu: 'swiftshader_indirect', window: 'none', features: '', lcd: { w: 720, h: 1600, dpi: 280 } },
+  // ANGLE on SwiftShader's Vulkan engine (what Chrome uses for software graphics), instead of SwiftShader's older
+  // OpenGL ES library, whose generated code crashed phones while apps were drawing.
+  // (Plain "swangle": unlike swiftshader_indirect, "swangle_indirect" is not understood and silently falls back.)
+  swangle: { gpu: 'swangle', window: 'none', features: '', lcd: { w: 720, h: 1600, dpi: 280 } },
 };
 
 function pickSystemImage() {
@@ -48,8 +55,8 @@ function writeAvd(img, mode) {
   const config = {
     'PlayStore.enabled': img.tag === 'google_apis_playstore' ? 'yes' : 'no',
     'abi.type': img.abi,
-    'avd.id': cfg.AVD,
-    'avd.name': cfg.AVD,
+    'avd.id': AVD,
+    'avd.name': AVD,
     'avd.ini.encoding': 'UTF-8',
     'disk.dataPartition.size': '8G',
     'fastboot.forceColdBoot': 'no',
@@ -93,8 +100,8 @@ function writeAvd(img, mode) {
   };
   fs.writeFileSync(path.join(avdDir, 'config.ini'), Object.entries(config).map(([k, v]) => `${k}=${v}`).join('\n') + '\n');
   fs.writeFileSync(
-    path.join(AVD_HOME, `${cfg.AVD}.ini`),
-    [`avd.ini.encoding=UTF-8`, `path=${avdDir}`, `path.rel=avd${path.sep}${cfg.AVD}.avd`, `target=${img.api}`].join('\n') + '\n',
+    path.join(AVD_HOME, `${AVD}.ini`),
+    [`avd.ini.encoding=UTF-8`, `path=${avdDir}`, `path.rel=avd${path.sep}${AVD}.avd`, `target=${img.api}`].join('\n') + '\n',
   );
 }
 
@@ -113,7 +120,7 @@ function imageFromConfig() {
 async function bootOnce(mode) {
   const display = cfg.emulatorDisplayArgs(mode);
   console.log(`Cold-booting with ${mode.gpu} graphics. The first boot takes a few minutes…`);
-  const proc = spawn(cfg.EMULATOR, ['-avd', cfg.AVD, '-port', String(PORT), '-no-snapshot-load', '-no-audio', '-no-boot-anim', ...display], {
+  const proc = spawn(cfg.EMULATOR, ['-avd', AVD, '-port', String(PORT), '-no-snapshot-load', '-no-audio', '-no-boot-anim', ...display], {
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -140,6 +147,7 @@ async function bootOnce(mode) {
   const gles = await shell(serial, "dumpsys SurfaceFlinger | grep -m1 'GLES:'", { timeout: 10000 }).catch(() => '');
   console.log(`Renderer: ${gles.replace(/^\s*GLES:\s*/, '').trim()}`);
   if (mode.gpu === 'host' && /SwiftShader/i.test(gles)) return { ok: false, why: 'host GPU was not used', proc, state };
+  if (mode.gpu === 'swangle' && !/ANGLE/i.test(gles)) return { ok: false, why: 'ANGLE was not used (the emulator fell back to another renderer)', proc, state };
   return { ok: true, proc, state };
 }
 
@@ -162,7 +170,7 @@ async function main() {
 
   const hasSnapshot = fs.existsSync(path.join(avdDir, 'snapshots', cfg.SNAPSHOT));
   if (hasSnapshot && fs.existsSync(cfg.EMULATOR_FILE) && !force) {
-    console.log(`Emulator profile "${cfg.AVD}" with snapshot "${cfg.SNAPSHOT}" already exists. Use --force to rebuild it.`);
+    console.log(`Emulator profile "${AVD}" with snapshot "${cfg.SNAPSHOT}" already exists. Use --force to rebuild it.`);
     return;
   }
   const img = imageFromConfig() || pickSystemImage();
@@ -174,7 +182,7 @@ async function main() {
   let result = null;
   for (const name of order) {
     const mode = MODES[name];
-    if (!mode) throw new Error(`Unknown --gpu mode "${name}". Use host or swiftshader.`);
+    if (!mode) throw new Error(`Unknown --gpu mode "${name}". Use host, swiftshader or swangle.`);
     fs.rmSync(path.join(avdDir, 'snapshots'), { recursive: true, force: true });
     writeAvd(img, mode);
     result = await bootOnce(mode);
@@ -206,7 +214,7 @@ async function main() {
   if (!/OK/.test(saved.stdout)) throw new Error(`Snapshot failed: ${saved.stdout}`);
   await kill(result);
   fs.mkdirSync(path.dirname(cfg.EMULATOR_FILE), { recursive: true });
-  fs.writeFileSync(cfg.EMULATOR_FILE, JSON.stringify({ gpu: chosen.gpu, window: chosen.window, features: chosen.features, lcd: chosen.lcd }, null, 2));
+  fs.writeFileSync(cfg.EMULATOR_FILE, JSON.stringify({ avd: AVD, gpu: chosen.gpu, window: chosen.window, features: chosen.features, lcd: chosen.lcd }, null, 2));
   console.log(`Done (${chosen.name} graphics, ${chosen.lcd.w}x${chosen.lcd.h}). Start Handset with: npm start`);
 }
 

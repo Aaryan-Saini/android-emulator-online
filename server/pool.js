@@ -26,6 +26,7 @@ class Device {
     this.port = cfg.BASE_PORT + slot * 2;
     this.serial = `emulator-${this.port}`;
     this.state = 'booting'; // booting | ready | busy | stopping
+    this.avd = cfg.AVD; // emulator profile it was started from
     this.pid = null; // emulator process
     this.startedAt = Date.now();
     this.missing = 0;
@@ -65,8 +66,15 @@ class DevicePool extends EventEmitter {
       if (cfg.KEEP_PHONES_ON_RESTART && prev && online.has(serial) && (prev.state === 'busy' || prev.state === 'ready')) {
         // A phone from before the restart is still running: take it over.
         const d = new Device(slot);
-        Object.assign(d, { startedAt: prev.startedAt, state: prev.state, pid: prev.pid || null, qemuPid: prev.qemuPid || null, paused: Boolean(prev.paused), adopted: true });
+        Object.assign(d, { startedAt: prev.startedAt, state: prev.state, pid: prev.pid || null, qemuPid: prev.qemuPid || null, paused: Boolean(prev.paused), avd: prev.avd || 'handset-base', adopted: true });
         this.devices.push(d);
+        // A spare from an older emulator profile (e.g. before a graphics switch): replace it with a current one.
+        // Phones in use are kept until their session ends.
+        if (d.state === 'ready' && d.avd !== cfg.AVD) {
+          log('pool', `${serial} is a spare from profile ${d.avd}; replacing it with one from ${cfg.AVD}`);
+          this.destroy(d);
+          continue;
+        }
         if (!d.paused) this.startHelper(d); // a paused phone restarts its helper when it is woken
         log('pool', `${serial} adopted (${d.state})`);
       } else if (online.has(serial)) {
@@ -120,7 +128,7 @@ class DevicePool extends EventEmitter {
   }
 
   save() {
-    const list = this.devices.filter((d) => d.state !== 'stopping').map((d) => ({ slot: d.slot, serial: d.serial, port: d.port, state: d.state, pid: d.pid, qemuPid: d.qemuPid, startedAt: d.startedAt, paused: Boolean(d.paused) }));
+    const list = this.devices.filter((d) => d.state !== 'stopping').map((d) => ({ slot: d.slot, serial: d.serial, port: d.port, state: d.state, pid: d.pid, qemuPid: d.qemuPid, startedAt: d.startedAt, paused: Boolean(d.paused), avd: d.avd }));
     try {
       fs.mkdirSync(cfg.DATA, { recursive: true });
       fs.writeFileSync(REGISTRY, JSON.stringify(list, null, 2));

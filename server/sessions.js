@@ -453,8 +453,9 @@ class SessionManager {
       let baselineTaken = false;
       let prepared = 0;
       const io = await this.fastIo(session);
-      // Apps where instant filling did not work before are filled by typing (screen reads stay fast).
-      if (app.fillMode === 'type') io.setText = undefined; // still focus fields and click buttons through the helper
+      // Apps where instant filling did not work before are filled by typing (screen reads stay fast). 'typed' and
+      // not the older 'type': that was recorded before instant filling waited for focus, so it is retried once.
+      if (app.fillMode === 'typed') io.setText = undefined; // still focus fields and click buttons through the helper
       const attempt = (withIo) => signIn({
         serial,
         pkg,
@@ -499,8 +500,8 @@ class SessionManager {
         step('Trying again by typing');
         result = await attempt({ ...io, setText: undefined });
         if (result.ok) {
-          app.fillMode = 'type';
-          store.rememberFillMode(app.id, 'type');
+          app.fillMode = 'typed';
+          store.rememberFillMode(app.id, 'typed');
         }
       }
       log('session', `${session.id.slice(0, 6)} sign-in as "${account.name}" ${result.ok ? 'done' : 'failed'} in ${secs()}s${result.message ? `: ${result.message}` : ''}`);

@@ -121,15 +121,28 @@ class A11y {
     return `//*[@bounds=${xq(node.bounds)}${node.cls ? ` and @class=${xq(node.cls)}` : ''}]`;
   }
 
+  // Instant fill: the whole value at once, like a password manager. Flutter only accepts it on a field that has
+  // focus, and on a busy PC the app can take 1-2 s to move focus (a fixed short wait made this fail at random),
+  // so wait until the field reports focus, then check it holds the value. Throws if it did not take, so the caller
+  // can type instead. Measured: 12 of 12 fields correct, ~1-3 s each.
   async setText(node, text) {
-    const xpath = this.xpathFor(node);
-    let id = await this.find(xpath);
+    const id = await this.find(this.xpathFor(node));
     if (!id) throw new Error('field not found');
-    // Flutter only accepts "set text" on a field that has focus, so focus it first.
-    await this.call('POST', `/element/${id}/click`, {}, 10000).catch(() => {});
-    await sleep(150);
-    id = (await this.find(xpath).catch(() => null)) || id;
+    const focused = async () => String(await this.call('GET', `/element/${id}/attribute/focused`, null, 5000)) === 'true';
+    let ok = await focused();
+    for (let round = 0; round < 2 && !ok; round++) {
+      await this.call('POST', `/element/${id}/click`, {}, 10000).catch(() => {});
+      for (const t0 = Date.now(); Date.now() - t0 < 2500 && !(ok = await focused()); ) await sleep(50);
+    }
+    if (!ok) throw new Error('the field did not take focus');
     await this.call('POST', `/element/${id}/value`, { text, replace: true }, 10000);
+    const holds = (got) => (node.password ? got.length === text.length : got === text);
+    for (let i = 0; i < 15; i++) {
+      const got = await this.call('GET', `/element/${id}/text`, null, 5000);
+      if (holds(typeof got === 'string' ? got : '')) return;
+      await sleep(100);
+    }
+    throw new Error('the field did not take the value');
   }
 
   async click(node) {
