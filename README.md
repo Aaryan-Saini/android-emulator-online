@@ -73,7 +73,7 @@ The frame's side buttons are clickable (power, volume up/down). The toolbar also
 
 ## Test accounts (switch roles in one click)
 
-Save a login for each role of an app (for example *Admin* and *Front desk*) with **+ Add account** in the panel beside the phone. **Export** / **Import** move them between apps or computers as a file (it contains the passwords). Anyone who opens the app's link then gets the **Sign in as** list and can switch roles in one click. They never see the passwords. Accounts can be added or changed from any browser on the computer Handset runs on (`http://localhost`), or from the browser that uploaded the app; visitors from other machines cannot. They are stored in `data/apps/<id>/meta.json`.
+Save a login for each role of an app (for example *Admin* and *Front desk*) with **+ Add account** in the panel beside the phone. Drag accounts up or down to reorder them (or <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd>). **Export** / **Import** move them between apps or computers as a file (it contains the passwords). Anyone who opens the app's link then gets the **Sign in as** list and can switch roles in one click. They never see the passwords. Accounts can be added or changed from any browser on the computer Handset runs on (`http://localhost`), or from the browser that uploaded the app; visitors from other machines cannot. They are stored in `data/apps/<id>/meta.json`.
 
 What happens on **Sign in as** (`server/autologin.js`):
 

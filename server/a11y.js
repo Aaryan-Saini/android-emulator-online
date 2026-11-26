@@ -138,6 +138,16 @@ class A11y {
     await this.call('POST', `/element/${id}/click`, {}, 10000);
   }
 
+  // Whether a text field has focus and what it holds right now. Password fields read as one dot per
+  // character, so their length can be checked.
+  async fieldState(node) {
+    const id = await this.find(this.xpathFor(node));
+    if (!id) throw new Error('field not found');
+    const focused = await this.call('GET', `/element/${id}/attribute/focused`, null, 5000);
+    const text = await this.call('GET', `/element/${id}/text`, null, 5000);
+    return { focused: String(focused) === 'true', text: typeof text === 'string' ? text : '' };
+  }
+
   stop() {
     this.ready = false;
     if (this.proc && this.proc.exitCode === null) this.proc.kill();

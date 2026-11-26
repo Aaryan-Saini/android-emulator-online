@@ -660,7 +660,13 @@
   const ICON_GO = '<svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
   const ICON_CHECK = '<svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
   const ICON_X = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>';
-  const ICON_EYE = '<svg viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.8"/></svg>';
+  const ICON_GRIP = '<svg viewBox="0 0 10 18"><circle cx="2.5" cy="3" r="1.5"/><circle cx="7.5" cy="3" r="1.5"/><circle cx="2.5" cy="9" r="1.5"/><circle cx="7.5" cy="9" r="1.5"/><circle cx="2.5" cy="15" r="1.5"/><circle cx="7.5" cy="15" r="1.5"/></svg>';
+  function grip() {
+    const g = el('span', { class: 'acct-grip', 'aria-hidden': 'true' });
+    g.innerHTML = ICON_GRIP;
+    return g;
+  }
+  const ICON_EYE ='<svg viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.8"/></svg>';
 
   function initials(s) {
     const parts = String(s).replace(/@.*/, '').split(/[\s._-]+/).filter(Boolean);
@@ -701,8 +707,10 @@
         type: 'button',
         disabled: busy || undefined,
         title: isCurrent ? `Signed in as ${a.name}. Click to sign in again.` : `Sign in as ${a.name}`,
-        onclick: () => signInAs(a.id),
+        onclick: () => !justDragged && signInAs(a.id), // the click that ends a drag is not a sign-in
+        'data-id': a.id,
       },
+      canManage() ? grip() : null,
       el('span', { class: 'avatar', style: { background: `hsl(${hue(a.username || a.name)} 40% 40%)` } }, initials(a.name)),
       el(
         'span',
@@ -741,6 +749,119 @@
     if (canManage()) nodes.push(tools());
     return nodes;
   }
+
+  // ---------- reorder by dragging (or Alt+Up / Alt+Down), for people who can manage accounts ----------
+  let justDragged = false;
+
+  function moveAccount(from, to) {
+    const list = app.accounts;
+    if (from === to || from < 0 || to < 0 || to >= list.length) return;
+    const before = list.slice();
+    list.splice(to, 0, list.splice(from, 1)[0]);
+    renderAccounts();
+    saveOrder(list.map((a) => a.id), before);
+  }
+
+  // Saving sends the full list in the new order; account ids stay the same, so saved sign-ins are kept.
+  async function saveOrder(ids, before) {
+    const headers = { 'X-Owner-Key': ownerKey() || '' };
+    try {
+      const { accounts } = await api(`/api/apps/${appId}/accounts`, { headers });
+      const byId = new Map(accounts.map((a) => [a.id, a]));
+      const ordered = [...ids.map((id) => byId.get(id)).filter(Boolean), ...accounts.filter((a) => !ids.includes(a.id))];
+      const res = await api(`/api/apps/${appId}/accounts`, {
+        method: 'PUT',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accounts: ordered }),
+      });
+      app.accounts = res.accounts;
+      renderAccounts();
+    } catch (e) {
+      app.accounts = before;
+      renderAccounts();
+      toast(`Could not save the new order: ${e.message}`);
+    }
+  }
+
+  function sortable(container) {
+    container.addEventListener('pointerdown', (e) => {
+      const row = e.target.closest('.acct-row');
+      if (!row || e.button !== 0 || e.pointerType === 'touch' || row.disabled || !canManage()) return;
+      const listEl = row.parentElement;
+      const rows = [...listEl.querySelectorAll('.acct-row')];
+      const from = rows.indexOf(row);
+      if (rows.length < 2 || from < 0) return;
+      const startY = e.clientY;
+      let rects = null;
+      let to = from;
+      const update = (ev) => {
+        let dy = ev.clientY - startY;
+        if (!rects) {
+          if (Math.abs(dy) < 6) return; // a click, not a drag
+          rects = rows.map((r) => r.getBoundingClientRect());
+          row.setPointerCapture(e.pointerId);
+          listEl.classList.add('is-sorting');
+          row.classList.add('is-dragging');
+        }
+        const r = rects[from];
+        dy = Math.max(rects[0].top - r.top, Math.min(rects[rects.length - 1].bottom - r.bottom, dy));
+        const center = r.top + r.height / 2 + dy;
+        to = rects.filter((q, i) => i !== from && q.top + q.height / 2 < center).length;
+        const gap = rects.length > 1 ? Math.max(0, rects[1].top - rects[0].bottom) : 8;
+        const shift = r.height + gap;
+        row.style.transform = `translateY(${dy}px)`;
+        rows.forEach((other, i) => {
+          if (i === from) return;
+          const y = from < to && i > from && i <= to ? -shift : to < from && i >= to && i < from ? shift : 0;
+          other.style.transform = y ? `translateY(${y}px)` : '';
+        });
+      };
+      const finish = (ev, cancel = false) => {
+        window.removeEventListener('pointermove', update);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onCancel);
+        window.removeEventListener('keydown', onKey, true);
+        if (!rects) return;
+        justDragged = true;
+        setTimeout(() => (justDragged = false), 0);
+        listEl.classList.remove('is-sorting');
+        row.classList.remove('is-dragging');
+        rows.forEach((r) => (r.style.transform = ''));
+        if (!cancel) setTimeout(() => moveAccount(from, to), 0); // after the browser's closing click
+      };
+      const onUp = (ev) => finish(ev);
+      const onCancel = (ev) => finish(ev, true);
+      const onKey = (ev) => {
+        if (ev.key !== 'Escape') return;
+        ev.stopPropagation();
+        finish(ev, true);
+      };
+      window.addEventListener('pointermove', update);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onCancel);
+      window.addEventListener('keydown', onKey, true);
+    });
+    // The click that ends a drag must not sign in.
+    container.addEventListener('click', (e) => {
+      if (!justDragged) return;
+      e.stopPropagation();
+      e.preventDefault();
+    }, true);
+    container.addEventListener('keydown', (e) => {
+      const row = e.target.closest && e.target.closest('.acct-row');
+      if (!row || !e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || !canManage() || row.disabled) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const from = app.accounts.findIndex((a) => a.id === row.dataset.id);
+      const to = from + (e.key === 'ArrowUp' ? -1 : 1);
+      if (to < 0 || to >= app.accounts.length) return;
+      moveAccount(from, to);
+      const moved = container.querySelector(`.acct-row[data-id="${CSS.escape(row.dataset.id)}"]`);
+      if (moved) moved.focus();
+    });
+  }
+  sortable($('accountsList'));
+  sortable(acctMenu);
 
   function addAccount() {
     if (canManage()) return openEditor({ add: true });

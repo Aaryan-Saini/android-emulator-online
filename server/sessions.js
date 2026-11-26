@@ -303,6 +303,7 @@ class SessionManager {
       setText: a11y ? (n, v) => a11y.setText(n, v) : undefined,
       click: a11y ? (n) => a11y.click(n) : undefined,
       focus: a11y ? (n) => a11y.click(n) : undefined, // clicking a text field focuses it
+      fieldState: a11y ? (n) => a11y.fieldState(n) : undefined,
       async tap(n, ui) {
         const stream = s();
         if (!stream) return void (await shell(serial, `input tap ${n.x} ${n.y}`, { timeout: 10000 }));

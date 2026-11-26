@@ -196,18 +196,61 @@ async function looksSignedOut(serial, pkg, loginTexts = [], a11y = null) {
 async function signIn({ serial, pkg, prepare, launch, fields, io, onStep, onLoginScreen, cancelled }) {
   io = io || adbIo(serial);
   const read = () => readScreen(serial, io.a11y);
-  // Fill a field: instantly through the accessibility helper (like a password manager), else type into it.
-  const fill = async (field, value, from) => {
-    if (io.setText && (await io.setText(field, value).then(() => true, () => false))) return;
-    // Type into it. Focus it through the helper when possible (found by its order, so a sliding keyboard can't
-    // make us miss), otherwise close the keyboard and tap where the screen read says it is.
+  // Measured on a busy PC: the app can take over a second to move focus to a field and to take in typed keys.
+  // Keys sent before focus moves land in the previous field (the start of a password ended up in the email), so
+  // with the helper we wait until the field really has focus, and until it holds what was typed.
+  // Returns the field's state ({ focused, text }) when the helper can read it, else null.
+  const focusField = async (field, from) => {
     if (!(io.focus && (await io.focus(field).then(() => true, () => false)))) {
       await io.hideKeyboard();
       await io.tap(field, from);
+      await sleep(250);
+      return null;
     }
-    await sleep(250); // let the field take focus, or the first keystrokes are lost
-    await io.clear();
+    if (!io.fieldState) return void (await sleep(250));
+    let state = null;
+    for (let round = 0; round < 2; round++) {
+      const t0 = Date.now();
+      while (Date.now() - t0 < 1500) {
+        state = await io.fieldState(field).catch(() => null);
+        if (!state || state.focused) return state;
+        await sleep(60);
+      }
+      await io.focus(field).catch(() => {}); // the first click did not take: click again
+    }
+    return state;
+  };
+  const settleField = async (field, value, password) => {
+    if (!io.fieldState) return;
+    const t0 = Date.now();
+    let last = null;
+    let same = 0;
+    while (Date.now() - t0 < 4000) {
+      const s = await io.fieldState(field).catch(() => null);
+      if (!s || (password ? s.text.length === value.length : s.text === value)) return;
+      same = s.text === last ? same + 1 : 0;
+      if (same >= 3) return; // stopped changing: the read-back below decides whether to retype
+      last = s.text;
+      await sleep(120);
+    }
+  };
+  // Remove what a field holds: go to its end and delete exactly that many characters. (Select-all + Delete does
+  // not clear fields in some apps, and a blind clear could hit the previous field.)
+  const erase = async (count) => {
+    if (count <= 0) return;
+    await io.key(123); // end of the field
+    await io.del(count);
+  };
+  // Fill a field: instantly through the accessibility helper (like a password manager), else type into it.
+  const fill = async (field, value, from, password) => {
+    if (io.setText && (await io.setText(field, value).then(() => true, () => false))) return;
+    // Focus it through the helper when possible (found by its order, so a sliding keyboard can't make us miss),
+    // otherwise close the keyboard and tap where the screen read says it is.
+    const state = await focusField(field, from);
+    if (state && state.focused) await erase(state.text.length);
+    else if (!io.fieldState) await io.clear(); // no way to read the field: clear it the old way
     await io.text(value);
+    await settleField(field, value, password);
   };
   // Press a button: click the element itself through the helper (no coordinates), else tap where it was.
   const press = async (node, from) => {
@@ -324,7 +367,7 @@ async function signIn({ serial, pkg, prepare, launch, fields, io, onStep, onLogi
         if (!value) continue;
         check();
         onStep(`Entering ${value.label.toLowerCase()}`);
-        await fill(target, value.value, ui);
+        await fill(target, value.value, ui, target.password);
         if (target.password) st.si++;
         else {
           st.pi++;
@@ -356,14 +399,11 @@ async function signIn({ serial, pkg, prepare, launch, fields, io, onStep, onLogi
           const field = fieldOf(f);
           onStep(`Retyping ${f.label.toLowerCase()}`);
           if (io.setText && (await io.setText(field, f.value).then(() => true, () => false))) continue;
-          if (!(io.focus && (await io.focus(field).then(() => true, () => false)))) {
-            await io.hideKeyboard();
-            await io.tap(field, back);
-          }
-          await sleep(300);
-          await io.key(123); // move to the end
-          await io.del(field.text.length + 4);
+          const state = await focusField(field, back);
+          if (state && !state.focused) continue; // could not focus it; the next read-back tries again
+          await erase((state ? state.text.length : field.text.length) + (state ? 0 : 4));
           await io.text(f.value);
+          await settleField(field, f.value, f.password);
         }
       }
       if (!st.screen.typed.length) {
