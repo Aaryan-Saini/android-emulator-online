@@ -26,7 +26,7 @@ browser ──WebSocket────▶ server ──adb────▶ emulator 
    └─ WebCodecs decoder → <canvas>; pointer events → multi-touch
 ```
 
-- **Phones** (`server/pool.js`): emulators boot with `-read-only -snapshot handset_clean`, so each one starts in 10–15 s from the same clean state and nothing is saved. One phone is kept booted and waiting (`WARM_DEVICES`), so new visitors usually skip the boot. After a session the phone is killed and a new one is warmed.
+- **Phones** (`server/pool.js`): emulators boot with `-read-only -snapshot handset_clean`, so each one starts in 10–15 s from the same clean state and nothing is saved. By default no spare phone is kept running (`WARM_DEVICES=0`), so a new session waits about 12 s while its phone boots; set `WARM_DEVICES=1` to keep one ready. After a session the phone is destroyed.
 - **Sessions** (`server/sessions.js`): queue → install (`adb install`, or `install-multiple` for bundles) → launch → stream. There is no time limit by default: a session lasts while the tab is open, and ends when the visitor clicks *End session* or `IDLE_SECONDS` after the tab closes. A page refresh reconnects to the same phone.
 - **Streaming** (`server/scrcpy.js`): runs the bundled scrcpy-server 5.0.1 on the phone and forwards its H.264 stream over the WebSocket. Each browser asks for exactly the resolution it displays (and asks again on full screen), because the phone's video encoder shares the CPU with the app. If a visitor's connection falls behind, frames are dropped up to the next keyframe so lag never builds up.
 - **CPU priority**: the phone someone is using runs at above-normal priority, and spare phones waiting for the next visitor run below normal.
@@ -67,7 +67,8 @@ All optional, as environment variables:
 | --- | --- | --- |
 | `PORT` | `3000` | HTTP port |
 | `MAX_DEVICES` | `2` | Phones that may run at once. Each uses about 5 GB of RAM. |
-| `WARM_DEVICES` | `1` | Phones kept booted and waiting |
+| `WARM_DEVICES` | `1` | Spare phones kept booted for the next visitor. With `FREEZE_SPARE` (default `true`) the spare is frozen while it waits (~0% CPU, ~0 MB RAM in use) and wakes in a few seconds |
+| `PHONE_WIFI` | `false` | Phones go online over mobile data. The emulator's Wi-Fi drops ~10 s after a frozen phone wakes (apps say "You're offline"); `true` keeps Wi-Fi on anyway |
 | `SESSION_MINUTES` | `0` | Maximum session length; `0` means no limit |
 | `IDLE_SECONDS` | `120` | Shut a phone down this long after its tab closes |
 | `MAX_SESSIONS_PER_IP` | `2` | Concurrent phones per visitor |
@@ -79,6 +80,16 @@ All optional, as environment variables:
 | `KEEP_PHONES_ON_RESTART` | `true` | Phones and sessions keep running while the server restarts; visitors reconnect automatically. `npm run stop-phones` stops them |
 | `TRUST_PROXY` | unset | Set when behind a reverse proxy so per-visitor limits use `X-Forwarded-For` |
 | `ANDROID_HOME` | auto | Android SDK location |
+
+## When a phone crashes
+
+The session moves to a fresh phone with the same app (a few seconds), and the crash is written to `data/logs/crashes.log` with Windows' crash record. To also see *where* in the emulator it crashed, let Windows keep a small crash dump: run this once from a PowerShell window opened as administrator:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\enable-crash-dumps.ps1   # add -Off to undo
+```
+
+Each crash then adds the library it happened in and the libraries on the crashing thread's stack to `crashes.log`. `node server/crashinfo.js` explains the newest dump in `data/crash-dumps` again.
 
 ## Letting other people use it
 
@@ -104,7 +115,8 @@ Anyone with access can upload an app and get a phone with internet access. If th
 
 ```text
 server/index.js     HTTP routes, static files, WebSocket upgrade
-server/pool.js      emulator pool (boot, hand out, destroy)
+server/pool.js      emulator pool (boot, hand out, freeze/wake, destroy)
+server/crashinfo.js explains phone crashes (Windows crash record, crash dump reader)
 server/sessions.js  session lifecycle, install/launch, browser ↔ phone bridge
 server/scrcpy.js    scrcpy-server launcher, stream parser, control messages
 server/apk.js       aapt2 parsing, adaptive icon extraction, bundle unpacking

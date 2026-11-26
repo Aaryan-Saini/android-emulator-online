@@ -142,6 +142,7 @@ async function route(req, res) {
   if (req.method === 'GET' && (r = m(/^\/api\/sessions\/([\w-]+)\/screenshot$/))) {
     const session = sessions.get(r[1]);
     if (!session || !session.device) return json(res, 404, { error: 'No phone is running for this session' });
+    await sessions.wake(session);
     const png = await screencap(session.device.serial);
     const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
     res.writeHead(200, {
@@ -191,6 +192,10 @@ setInterval(() => {
     }
   }
 }, 20000).unref();
+
+// A bug somewhere must not take every session down with it: log it and keep serving.
+process.on('uncaughtException', (err) => log('server', `unexpected error (still running): ${err && err.stack ? err.stack : err}`));
+process.on('unhandledRejection', (err) => log('server', `unexpected error (still running): ${err && err.stack ? err.stack : err}`));
 
 // Stopping the server keeps phones and sessions alive (they are picked up again on the next start), unless
 // KEEP_PHONES_ON_RESTART=false or the server is started with --stop-phones-on-exit. `npm run stop-phones` stops them.

@@ -81,7 +81,19 @@ module.exports = {
 
   // How many phones may run at once, and how many to keep booted and waiting for the next visitor.
   MAX_DEVICES: num('MAX_DEVICES', 2),
+  // Spare phones kept ready for the next visitor. With FREEZE_SPARE they are paused and their memory handed back
+  // to Windows while they wait (measured: ~0% CPU, ~0 MB RAM in use), and wake in ~1.5 s when someone arrives.
   WARM_DEVICES: num('WARM_DEVICES', 1),
+  FREEZE_SPARE: bool('FREEZE_SPARE', true),
+  // Pause a phone (0% CPU) when its tab is hidden this long, or as soon as its tab is closed. It wakes on return.
+  PAUSE_HIDDEN_SECONDS: num('PAUSE_HIDDEN_SECONDS', 30),
+  // Switch off apps visitors' apps don't need (YouTube, Gmail, Maps…) on every phone to cut background load.
+  STRIP_EXTRAS: bool('STRIP_EXTRAS', true),
+  // With 2+ phones busy, give each its own share of CPU cores so they don't interrupt each other.
+  PIN_CORES: bool('PIN_CORES', true),
+  // Phones go online over mobile data instead of the emulator's Wi-Fi. Measured: the emulator's Wi-Fi drops ~10 s
+  // after a frozen phone wakes (apps say "You're offline" for ~5 s) and does not come back; mobile data stays up.
+  PHONE_WIFI: bool('PHONE_WIFI', false),
   BASE_PORT: num('EMULATOR_BASE_PORT', 5620),
   BOOT_TIMEOUT_MS: num('BOOT_TIMEOUT_SECONDS', 150) * 1000,
 

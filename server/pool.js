@@ -12,8 +12,13 @@ const cfg = require('./config');
 const { adb, shell } = require('./adb');
 const { run, sleep, log } = require('./util');
 const a11y = require('./a11y');
+const crashinfo = require('./crashinfo');
 
 const REGISTRY = path.join(cfg.DATA, 'devices.json');
+// crashes.log: every phone crash with what is known about it.
+const LOGS = path.join(cfg.DATA, 'logs');
+// Windows writes crash dumps here once it is told to (see README, "When a phone crashes").
+const DUMPS = path.join(cfg.DATA, 'crash-dumps');
 
 class Device {
   constructor(slot) {
@@ -60,9 +65,9 @@ class DevicePool extends EventEmitter {
       if (cfg.KEEP_PHONES_ON_RESTART && prev && online.has(serial) && (prev.state === 'busy' || prev.state === 'ready')) {
         // A phone from before the restart is still running: take it over.
         const d = new Device(slot);
-        Object.assign(d, { startedAt: prev.startedAt, state: prev.state, pid: prev.pid || null, qemuPid: prev.qemuPid || null, adopted: true });
+        Object.assign(d, { startedAt: prev.startedAt, state: prev.state, pid: prev.pid || null, qemuPid: prev.qemuPid || null, paused: Boolean(prev.paused), adopted: true });
         this.devices.push(d);
-        this.startHelper(d);
+        if (!d.paused) this.startHelper(d); // a paused phone restarts its helper when it is woken
         log('pool', `${serial} adopted (${d.state})`);
       } else if (online.has(serial)) {
         // Left behind by a run that did not shut down cleanly.
@@ -96,17 +101,26 @@ class DevicePool extends EventEmitter {
       const online = await this.onlineSerials();
       for (const d of [...this.devices]) {
         if (d.state === 'booting' || d.state === 'stopping') continue;
-        const gone = !online.has(d.serial) || !alive(d.pid);
-        d.missing = gone ? d.missing + 1 : 0;
-        if (d.missing >= 3) this.onExit(d, !alive(d.pid) ? 'process ended' : 'stopped responding'); // ~7 s, so a brief adb hiccup is not fatal
+        if (this.check(d)) continue;
+        d.missing = online.has(d.serial) ? 0 : d.missing + 1;
+        if (d.missing >= 3) this.onExit(d, 'stopped responding'); // ~7 s, so a brief adb hiccup is not fatal
       }
       setTimeout(tick, 2500);
     };
     setTimeout(tick, 2500);
   }
 
+  // A phone whose process has ended is gone for certain: say so at once instead of after three missed checks
+  // (that alone took ~7 s of a frozen screen per crash). Sessions call this the moment their stream breaks.
+  check(device) {
+    if (!device || !this.devices.includes(device) || device.state === 'booting' || device.state === 'stopping') return false;
+    if (alive(device.pid) && alive(device.qemuPid)) return false;
+    this.onExit(device, 'process ended');
+    return true;
+  }
+
   save() {
-    const list = this.devices.filter((d) => d.state !== 'stopping').map((d) => ({ slot: d.slot, serial: d.serial, port: d.port, state: d.state, pid: d.pid, qemuPid: d.qemuPid, startedAt: d.startedAt }));
+    const list = this.devices.filter((d) => d.state !== 'stopping').map((d) => ({ slot: d.slot, serial: d.serial, port: d.port, state: d.state, pid: d.pid, qemuPid: d.qemuPid, startedAt: d.startedAt, paused: Boolean(d.paused) }));
     try {
       fs.mkdirSync(cfg.DATA, { recursive: true });
       fs.writeFileSync(REGISTRY, JSON.stringify(list, null, 2));
@@ -195,14 +209,146 @@ class DevicePool extends EventEmitter {
       const waiter = this.waiters.shift();
       device.state = 'busy';
       this.setPriority(device, 'PRIORITY_ABOVE_NORMAL');
-      waiter.resolve(device);
+      // A frozen spare wakes in ~1.5 s; hand it over once it answers.
+      this.resume(device).then(() => waiter.resolve(device), () => waiter.resolve(device));
     }
     const spare = this.devices.filter((d) => d.state === 'booting' || d.state === 'ready').length;
     let need = this.waiters.length + cfg.WARM_DEVICES - spare;
     if (Date.now() < this.pausedUntil) need = 0;
     while (need-- > 0 && this.devices.length < cfg.MAX_DEVICES) this.boot();
+    // More idle phones than wanted (e.g. WARM_DEVICES was lowered, or one was taken over after a restart): shut the
+    // extras down, they only use memory and CPU.
+    const idle = this.devices.filter((d) => d.state === 'ready');
+    let surplus = idle.length - Math.max(0, cfg.WARM_DEVICES) - this.waiters.length;
+    for (const d of idle) {
+      if (surplus-- <= 0) break;
+      log('pool', `${d.serial} is a spare phone nobody needs; shutting it down`);
+      this.destroy(d);
+    }
+    this.pinCores();
     this.save();
     this.emit('change');
+  }
+
+  // ---------- saving CPU and memory ----------
+
+  // Freeze a phone: its CPU use drops to 0%. With `trim`, Windows also takes its memory back (measured: ~4.9 GB
+  // -> 3 MB in use); it comes back gradually after resume.
+  async pause(device, { trim = false } = {}) {
+    if (!device || device.paused || device.state === 'stopping') return;
+    await this.mobileDataOnly(device); // phones from before this setting: Wi-Fi would drop after the wake-up
+    const r = await adb(device.serial, ['emu', 'avd', 'pause'], { timeout: 10000 }).catch(() => null);
+    if (!r || !/OK/.test(r.stdout)) return;
+    device.paused = true;
+    // A paused emulator still spins one thread (~80% of a core); suspending the process stops it (measured 0%).
+    await this.winProcess(device, trim ? ['suspend', 'trim'] : ['suspend']);
+    log('pool', `${device.serial} paused${trim ? ' and memory released' : ''}`);
+    this.pinCores();
+    this.save();
+  }
+
+  // Wake a paused phone and wait until it answers (measured: ~0.2 s after the process resumes).
+  async resume(device) {
+    if (device.freezing) await device.freezing.catch(() => {});
+    if (!device.paused) return;
+    await this.winProcess(device, ['resume']);
+    await adb(device.serial, ['emu', 'avd', 'resume'], { timeout: 10000 }).catch(() => {});
+    device.paused = false;
+    for (let i = 0; i < 30; i++) {
+      if ((await shell(device.serial, 'echo ok', { timeout: 3000 }).catch(() => '')).includes('ok')) break;
+      await sleep(150);
+    }
+    if (!device.a11y || !device.a11y.ready) this.startHelper(device, true); // its helper may have stopped while frozen
+    await this.mobileDataOnly(device); // a phone frozen before this setting still has Wi-Fi, which is about to drop
+    // Don't hand the phone over until its internet works, so the app's first request does not fail.
+    const net = await this.waitForInternet(device);
+    log('pool', `${device.serial} resumed${net}`);
+    this.pinCores();
+    this.save();
+  }
+
+  // Wi-Fi off, mobile data on. See PHONE_WIFI in config.js for why.
+  async mobileDataOnly(device) {
+    if (cfg.PHONE_WIFI || device.wifiOff) return;
+    await shell(device.serial, 'svc wifi disable; svc data enable', { timeout: 10000 }).catch(() => {});
+    device.wifiOff = true;
+  }
+
+  // The phone fetches Android's own connectivity check page (a 204, a few bytes): that proves DNS and the
+  // connection out both work. Usually answers on the first try (~0.3 s). Gives up after ~5 s.
+  async waitForInternet(device, budgetMs = 5000) {
+    const t0 = Date.now();
+    const probe = `printf 'GET /generate_204 HTTP/1.0\\r\\nHost: connectivitycheck.gstatic.com\\r\\n\\r\\n' | timeout 2 nc connectivitycheck.gstatic.com 80 2>/dev/null | head -1`;
+    for (let i = 0; Date.now() - t0 < budgetMs; i++) {
+      const out = await shell(device.serial, probe, { timeout: 4000 }).catch(() => '');
+      if (/ 204\b/.test(out)) return i ? `, internet back after ${((Date.now() - t0) / 1000).toFixed(1)}s` : '';
+      if (i === 1) await shell(device.serial, cfg.PHONE_WIFI ? 'svc wifi enable; svc data enable' : 'svc data enable', { timeout: 5000 }).catch(() => {});
+      await sleep(400);
+    }
+    return ', but its internet is not working yet (is this PC online?)';
+  }
+
+  // Suspend / resume the emulator process and hand its memory back to Windows ('trim'), in one PowerShell call.
+  async winProcess(device, actions) {
+    if (!device.qemuPid) device.qemuPid = await this.findQemu(device);
+    const pid = device.qemuPid;
+    if (!pid) return;
+    if (process.platform !== 'win32') {
+      try {
+        if (actions.includes('suspend')) process.kill(pid, 'SIGSTOP');
+        if (actions.includes('resume')) process.kill(pid, 'SIGCONT');
+      } catch {}
+      return;
+    }
+    const steps = {
+      suspend: `[void][H.N]::NtSuspendProcess($h)`,
+      resume: `[void][H.N]::NtResumeProcess($h)`,
+      trim: `[void][H.N]::EmptyWorkingSet($h)`,
+    };
+    const ps = [
+      `Add-Type -Name N -Namespace H -MemberDefinition '[DllImport("ntdll.dll")] public static extern int NtSuspendProcess(System.IntPtr h); [DllImport("ntdll.dll")] public static extern int NtResumeProcess(System.IntPtr h); [DllImport("psapi.dll")] public static extern bool EmptyWorkingSet(System.IntPtr h);'`,
+      `$h = (Get-Process -Id ${pid}).Handle`,
+      ...actions.map((a) => steps[a]),
+    ].join('; ');
+    await run('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { timeout: 30000 }).catch(() => {});
+  }
+
+  // With two or more phones actively in use, give each its own share of the CPU cores so they stop interrupting
+  // each other; a phone running alone gets every core.
+  pinCores() {
+    if (process.platform !== 'win32') return;
+    const n = Math.min(os.cpus().length, 30);
+    const all = 2 ** n - 1;
+    const active = this.devices.filter((d) => d.state === 'busy' && !d.paused && d.qemuPid);
+    for (const d of this.devices) {
+      if (!d.qemuPid || d.state === 'stopping') continue;
+      let mask = all;
+      const i = active.indexOf(d);
+      if (cfg.PIN_CORES && active.length >= 2 && i >= 0) {
+        const per = Math.max(1, Math.floor(n / active.length));
+        mask = (2 ** per - 1) * 2 ** (per * i);
+        if (i === active.length - 1) mask = all - (2 ** (per * i) - 1); // last one takes the remainder
+      }
+      if (d.affinity === mask) continue;
+      d.affinity = mask;
+      run('powershell', ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${d.qemuPid}).ProcessorAffinity = [IntPtr]${mask}`], { timeout: 15000 }).catch(() => {});
+    }
+  }
+
+  // Apps visitors' apps don't need, switched off on every phone to cut background CPU and memory.
+  async stripExtras(device) {
+    if (!cfg.STRIP_EXTRAS) return;
+    const extras = [
+      'com.google.android.youtube',
+      'com.google.android.apps.youtube.music',
+      'com.google.android.gm',
+      'com.google.android.apps.docs',
+      'com.google.android.apps.maps',
+      'com.google.android.apps.photos',
+      'com.google.android.apps.wellbeing',
+      'com.google.android.calendar',
+    ];
+    await shell(device.serial, `${extras.map((p) => `pm disable-user --user 0 ${p} >/dev/null 2>&1`).join('; ')}; am kill-all`, { timeout: 30000 }).catch(() => {});
   }
 
   // Start the emulator as its own process (not a child of the server), so it keeps running across restarts.
@@ -276,7 +422,9 @@ class DevicePool extends EventEmitter {
       'input keyevent KEYCODE_WAKEUP; wm dismiss-keyguard; settings put system accelerometer_rotation 0; settings put system user_rotation 0; input keyevent KEYCODE_HOME',
       { timeout: 10000 },
     ).catch(() => {});
+    await this.mobileDataOnly(device);
     await this.addTestMedia(device).catch(() => {});
+    await this.stripExtras(device);
     if (device.state !== 'booting') return;
     device.qemuPid = await this.findQemu(device);
     if (device.state !== 'booting') return;
@@ -284,8 +432,14 @@ class DevicePool extends EventEmitter {
     this.setPriority(device, 'PRIORITY_BELOW_NORMAL');
     this.failures = 0;
     log('pool', `${device.serial} ready in ${((Date.now() - device.startedAt) / 1000).toFixed(1)}s`);
-    this.startHelper(device);
-    this.maintain();
+    const helper = this.startHelper(device);
+    this.maintain(); // may hand it to someone who is waiting right now
+    // Nobody took it: it is the spare. Freeze it (0% CPU, memory back to Windows) once its helper is up.
+    if (cfg.FREEZE_SPARE && device.state === 'ready') {
+      device.freezing = Promise.race([helper || Promise.resolve(), sleep(40000)])
+        .then(() => (device.state === 'ready' ? this.pause(device, { trim: true }) : null))
+        .finally(() => (device.freezing = null));
+    }
   }
 
   // Test photos (vendor/test-media) in the phone's camera roll, so apps that ask for a photo have something to pick.
@@ -299,10 +453,14 @@ class DevicePool extends EventEmitter {
   }
 
   // The accessibility helper (fast sign-in) installs and starts in the background; sign-ins type until it is ready.
-  startHelper(device) {
-    if (!a11y.available() || device.a11y) return;
+  // Returns a promise that settles when the helper is up (or failed). `again`: replace a helper that is not running.
+  startHelper(device, again = false) {
+    if (!a11y.available()) return null;
+    if (device.a11y && !(again && !device.a11y.ready)) return device.a11yStart || null;
+    if (device.a11y) device.a11y.stop();
     device.a11y = new a11y.A11y(device.serial);
-    device.a11y.start().catch((e) => log('a11y', `${device.serial} helper not available: ${e.message}`));
+    device.a11yStart = device.a11y.start().catch((e) => log('a11y', `${device.serial} helper not available: ${e.message}`));
+    return device.a11yStart;
   }
 
   onExit(device, why) {
@@ -313,14 +471,47 @@ class DevicePool extends EventEmitter {
     if (unexpected) {
       log('pool', `${device.serial} exited unexpectedly (${why})`);
       this.emit('died', device);
+      this.noteCrash(device).catch(() => {});
     }
     this.maintain();
+  }
+
+  // Write down what is known about a crash in data/logs/crashes.log: Windows' crash record and, when crash dumps
+  // are on (scripts/enable-crash-dumps.ps1), where in the emulator it crashed. Runs after recovery has started.
+  async noteCrash(device) {
+    const pid = device.qemuPid;
+    await sleep(1500); // Windows finishes its record and dump before the process is gone, but give it a moment
+    const rec = await crashinfo.windowsRecord(pid);
+    let dump = null;
+    let file = pid && path.join(DUMPS, `qemu-system-x86_64-headless.exe.${pid}.dmp`);
+    if (!file || !fs.existsSync(file)) {
+      const recent = fs.existsSync(DUMPS) ? fs.readdirSync(DUMPS).filter((f) => /^qemu.*\.dmp$/i.test(f)).map((f) => path.join(DUMPS, f)).filter((f) => Date.now() - fs.statSync(f).mtimeMs < 120000) : [];
+      file = recent[0] || null;
+    }
+    if (file) {
+      try {
+        dump = crashinfo.analyzeDump(file);
+      } catch (e) {
+        dump = { summary: `could not read ${path.basename(file)}: ${e.message}` };
+      }
+    }
+    const up = Math.round((Date.now() - device.startedAt) / 1000);
+    const generated = rec && rec.module === 'unknown' ? 'code generated while running (the software graphics renderer)' : rec && rec.module;
+    const lines = [
+      `${new Date().toISOString()}  ${device.serial}  ${device.state}${device.paused ? ' (frozen)' : ''}, up ${up}s, emulator process ${pid || '?'}`,
+      rec ? `  windows: ${rec.what} (${rec.code}) in ${generated}, offset ${rec.offset}` : '  windows: no crash record (closed from outside, or out of memory?)',
+      dump ? `  dump: ${dump.summary}${dump.stack && dump.stack.length ? '\n    ' + dump.stack.join('\n    ') : ''}` : `  dump: none${fs.existsSync(DUMPS) ? '' : ' (crash dumps are off: run scripts/enable-crash-dumps.ps1 once, as administrator)'}`,
+    ];
+    fs.mkdirSync(LOGS, { recursive: true });
+    fs.appendFileSync(path.join(LOGS, 'crashes.log'), lines.join('\n') + '\n\n');
+    log('pool', `${device.serial} crash: ${dump ? dump.summary : rec ? `${rec.what} in ${generated}` : 'no Windows crash record'} (data/logs/crashes.log)`);
   }
 
   async destroy(device) {
     if (device.state === 'stopping') return;
     device.state = 'stopping';
     if (device.a11y) device.a11y.stop();
+    if (device.paused) await this.winProcess(device, ['resume']); // a suspended emulator cannot hear "kill"
     await adb(device.serial, ['emu', 'kill'], { timeout: 5000 }).catch(() => {});
     let gone = false;
     for (let i = 0; i < 20 && !gone; i++) {

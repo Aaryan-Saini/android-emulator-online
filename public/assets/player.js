@@ -156,6 +156,8 @@
   };
 
   document.addEventListener('visibilitychange', () => {
+    // Hidden tab: the server stops the video and, after a while, freezes the phone. Shown again: it wakes it.
+    send({ t: 'visibility', hidden: document.hidden });
     if (!document.hidden && video.pending) {
       const f = video.pending;
       video.pending = null;
@@ -399,6 +401,7 @@
     sock.binaryType = 'arraybuffer';
     sock.onopen = () => {
       retries = 0;
+      if (document.hidden) send({ t: 'visibility', hidden: true });
     };
     sock.onmessage = (e) => {
       if (typeof e.data !== 'string') {

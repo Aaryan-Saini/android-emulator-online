@@ -124,9 +124,18 @@ class SessionManager {
   }
 
   persist() {
-    const list = this.active()
-      .filter((s) => s.device && s.state === 'running')
-      .map((s) => ({ id: s.id, appId: s.app.id, ip: s.ip, serial: s.device.serial, createdAt: s.createdAt, expiresAt: s.expiresAt, signedInAs: s.signedInAs || null, maxSize: s.maxSize || null }));
+    // Every open session, including ones still waiting for a phone or being set up: after a restart they resume.
+    const list = this.active().map((s) => ({
+      id: s.id,
+      appId: s.app.id,
+      ip: s.ip,
+      state: s.state,
+      serial: s.device ? s.device.serial : null,
+      createdAt: s.createdAt,
+      expiresAt: s.expiresAt,
+      signedInAs: s.signedInAs || null,
+      maxSize: s.maxSize || null,
+    }));
     try {
       fs.mkdirSync(cfg.DATA, { recursive: true });
       fs.writeFileSync(SESSIONS_FILE, JSON.stringify(list, null, 2));
@@ -141,19 +150,36 @@ class SessionManager {
       } catch {}
     }
     const claimed = new Set();
+    const resume = [];
     for (const x of list) {
       const app = store.get(x.appId);
-      const device = this.pool.adopted(x.serial);
-      if (!app || !device || claimed.has(device)) continue;
+      if (!app) continue;
+      const device = x.serial ? this.pool.adopted(x.serial) : null;
       const s = new Session(app, x.ip);
-      Object.assign(s, { id: x.id, device, state: 'running', createdAt: x.createdAt, expiresAt: x.expiresAt, signedInAs: x.signedInAs, maxSize: x.maxSize || undefined });
+      Object.assign(s, { id: x.id, createdAt: x.createdAt, expiresAt: x.expiresAt, maxSize: x.maxSize || undefined });
       this.sessions.set(s.id, s);
-      claimed.add(device);
       if (s.expiresAt) s.timers.expire = setTimeout(() => this.end(s, 'Your session reached its time limit.'), Math.max(1000, s.expiresAt - Date.now()));
       this.armIdle(s); // its page reconnects within IDLE_SECONDS, or the phone is freed
-      log('session', `${s.id.slice(0, 6)} restored on ${device.serial} after a restart`);
+      if (device && !claimed.has(device)) {
+        claimed.add(device);
+        s.device = device;
+        if (x.state === 'running') {
+          Object.assign(s, { state: 'running', signedInAs: x.signedInAs });
+          log('session', `${s.id.slice(0, 6)} restored on ${device.serial} after a restart`);
+        } else {
+          s.state = 'installing';
+          resume.push([s, () => this.setup(s)]); // was still installing or opening the app: finish that
+          log('session', `${s.id.slice(0, 6)} restored on ${device.serial}; finishing setup`);
+        }
+      } else {
+        // Its phone is gone (or it was still waiting for one): get a fresh phone.
+        s.state = 'queued';
+        resume.push([s, () => this.run(s)]);
+        log('session', `${s.id.slice(0, 6)} restored after a restart; getting a fresh phone`);
+      }
     }
     this.pool.releaseUnclaimed(claimed);
+    for (const [s, go] of resume) go().catch((err) => this.end(s, err.message, true));
     // Saved sign-ins of phones that no longer exist.
     const keep = new Set(this.pool.devices.map((d) => `${d.serial}-${d.startedAt}`));
     try {
@@ -179,6 +205,12 @@ class SessionManager {
       session.expiresAt = Date.now() + cfg.SESSION_MINUTES * 60000;
       session.timers.expire = setTimeout(() => this.end(session, 'Your session reached its time limit.'), cfg.SESSION_MINUTES * 60000);
     }
+    await this.setup(session);
+  }
+
+  // Install the app on the session's phone and open it (also used to resume a session after a restart).
+  async setup(session) {
+    const { app, device } = session;
     if (session.client) this.startStream(session);
 
     this.setState(session, 'installing', `Installing ${app.name}`);
@@ -338,6 +370,7 @@ class SessionManager {
 
   async loginAs(session, accountId) {
     if (session.state !== 'running' || session.login) return;
+    await this.wake(session);
     const account = store.account(session.app, accountId);
     if (!account) return this.broadcast(session, { type: 'login', state: 'failed', label: '', message: 'That account no longer exists.' });
     const { app } = session;
@@ -497,6 +530,7 @@ class SessionManager {
   // which: 'username' | 'password' | 'extra:<n>'
   async typeField(session, accountId, which) {
     if (!session.device) return;
+    await this.wake(session);
     const account = store.account(session.app, accountId);
     if (!account) return;
     const extra = /^extra:(\d)$/.exec(which);
@@ -508,6 +542,7 @@ class SessionManager {
 
   async appAction(session, kind) {
     if (session.state !== 'running' || session.login) return;
+    await this.wake(session);
     const pkg = session.app.package;
     if (!SAFE_NAME.test(pkg)) return;
     if (kind === 'clear') session.signedInAs = null;
@@ -544,9 +579,11 @@ class SessionManager {
     }
     session.client = ws;
     clearTimeout(session.timers.idle);
+    clearTimeout(session.timers.pause);
+    session.hidden = false;
     this.broadcast(session);
     if (session.login) this.broadcast(session, { type: 'login', state: 'working', id: session.login.id, label: session.login.label, step: session.login.step });
-    if (session.device) this.startStream(session);
+    if (session.device) this.wake(session).then(() => session.client === ws && this.startStream(session));
 
     ws.on('message', (data, isBinary) => {
       if (isBinary) return;
@@ -563,8 +600,34 @@ class SessionManager {
       session.client = null;
       this.stopStream(session);
       this.armIdle(session);
+      // Tab closed (or connection lost): freeze the phone while we wait to see if they come back.
+      clearTimeout(session.timers.pause);
+      session.timers.pause = setTimeout(() => {
+        if (!session.client && !session.login && session.device) this.pool.pause(session.device, { trim: true });
+      }, 3000);
     });
     ws.on('error', () => {});
+  }
+
+  // Make sure the session's phone is running (it may have been paused while nobody was watching).
+  async wake(session) {
+    clearTimeout(session.timers.pause);
+    if (session.device && session.device.paused) await this.pool.resume(session.device);
+  }
+
+  // The visitor's tab was hidden or shown again. Hidden: stop the video, and after a while freeze the phone.
+  onVisibility(session, hidden) {
+    session.hidden = hidden;
+    clearTimeout(session.timers.pause);
+    if (hidden) {
+      this.stopStream(session);
+      session.timers.pause = setTimeout(() => {
+        if (session.hidden && !session.login && session.device) this.pool.pause(session.device);
+      }, cfg.PAUSE_HIDDEN_SECONDS * 1000);
+    } else if (session.device && session.client) {
+      const ws = session.client;
+      this.wake(session).then(() => session.client === ws && !session.hidden && this.startStream(session));
+    }
   }
 
   armIdle(session) {
@@ -605,8 +668,10 @@ class SessionManager {
     stream.on('close', (reason) => {
       if (session.stream === stream) session.stream = null;
       if (stream.stoppedByUs || session.state === 'ended' || session.client !== ws || ws.readyState !== 1) return;
-      // Keep retrying for ~15 s: if the phone itself crashed, the pool notices within ~8 s and moves the session to
-      // a fresh phone (recover), which is better than ending it here.
+      // The phone's process is gone: the pool moves the session to a fresh phone right now (recover).
+      if (session.device && this.pool.check(session.device)) return;
+      // Otherwise keep retrying for ~15 s: if the phone stopped answering, the pool notices within ~8 s and moves the
+      // session to a fresh phone, which is better than ending it here.
       if (session.streamRetries++ < 10) {
         log('session', `${session.id.slice(0, 6)} stream closed (${reason}), restarting`);
         setTimeout(() => session.device && this.startStream(session), 1500);
@@ -679,6 +744,9 @@ class SessionManager {
         break;
       case 'reset-video':
         if (s) s.simple(MSG.RESET_VIDEO);
+        break;
+      case 'visibility':
+        this.onVisibility(session, Boolean(m.hidden));
         break;
       case 'quality':
         this.resizeStream(session, m.max);
