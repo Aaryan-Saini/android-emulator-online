@@ -1,0 +1,50 @@
+[
+  {
+    "file": "test-document.jpg",
+    "id": "212437f5-df50-456b-99ed-4b1a448f1c8a",
+    "kind": "images",
+    "title": "Business Document",
+    "creator": "Daria Nepriakhina",
+    "creator_url": "https://epicantus.tumblr.com",
+    "license": "cc0",
+    "license_version": "1.0",
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "page": "https://stocksnap.io/photo/business-document-AB4F938C85",
+    "source": "stocksnap",
+    "credit_needed": false,
+    "attribution": "\"Business Document\" by Daria Nepriakhina is marked with CC0 1.0. To view the terms, visit https://creativecommons.org/publicdomain/zero/1.0/.",
+    "downloaded": "2026-11-26"
+  },
+  {
+    "file": "test-receipt-cafe.jpg",
+    "id": "1aad938a-8c00-4389-a914-99beb9ce2a22",
+    "kind": "images",
+    "title": "Coffee Cafelatte",
+    "creator": "Carli Jean",
+    "creator_url": "https://stocksnap.io/author/243",
+    "license": "cc0",
+    "license_version": "1.0",
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "page": "https://stocksnap.io/photo/coffee-cafelatte-F9A95133A1",
+    "source": "stocksnap",
+    "credit_needed": false,
+    "attribution": "\"Coffee Cafelatte\" by Carli Jean is marked with CC0 1.0. To view the terms, visit https://creativecommons.org/publicdomain/zero/1.0/.",
+    "downloaded": "2026-11-26"
+  },
+  {
+    "file": "test-office-desk.jpg",
+    "id": "b3be6880-561e-4926-bc94-de401f44d115",
+    "kind": "images",
+    "title": "Office Work",
+    "creator": "Ch%E2u%20Th%F4ng%20Phan",
+    "creator_url": "https://stocksnap.io/author/31913",
+    "license": "cc0",
+    "license_version": "1.0",
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "page": "https://stocksnap.io/photo/office-work-UP9J4EZYNJ",
+    "source": "stocksnap",
+    "credit_needed": false,
+    "attribution": "\"Office Work\" by Ch%E2u%20Th%F4ng%20Phan is marked with CC0 1.0. To view the terms, visit https://creativecommons.org/publicdomain/zero/1.0/.",
+    "downloaded": "2026-11-26"
+  }
+]

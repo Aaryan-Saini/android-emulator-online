@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#f2f0eb">
+  <title>Handset</title>
+  <link rel="preload" href="/assets/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body class="player">
+  <header class="bar">
+    <a class="wordmark" href="/" title="Back to Handset"><span>Handset</span></a>
+    <span class="divider"></span>
+    <div class="app-id">
+      <span id="appIcon"></span>
+      <span class="app-id-text"><strong id="appName">Loading…</strong><span id="appMeta"></span></span>
+    </div>
+    <div class="bar-actions">
+      <div class="acct" id="acct" hidden>
+        <button class="btn btn-ghost" id="acctBtn" type="button" aria-haspopup="menu" aria-expanded="false">
+          <svg class="person" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 19.5c1.2-3.4 3.9-5 7-5s5.8 1.6 7 5"/></svg>
+          <span id="acctBtnLabel">Switch account</span>
+          <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
+        </button>
+        <div class="menu" id="acctMenu" role="menu" hidden></div>
+      </div>
+      <button class="btn btn-ghost" id="shareBtn" type="button">Copy link</button>
+      <button class="btn btn-ink" id="endBtn" type="button">End session</button>
+    </div>
+  </header>
+
+  <main class="stage" id="stage">
+    <aside class="accounts" id="accounts" aria-label="Accounts" hidden>
+      <h2 class="accounts-title">Sign in as</h2>
+      <div id="accountsList"></div>
+    </aside>
+    <div class="rig">
+      <div class="phone" id="phone">
+        <button class="hw hw-power" type="button" data-nav="power" title="Power button" aria-label="Power button"></button>
+        <button class="hw hw-volup" type="button" data-nav="volup" title="Volume up" aria-label="Volume up"></button>
+        <button class="hw hw-voldown" type="button" data-nav="voldown" title="Volume down" aria-label="Volume down"></button>
+        <div class="screen" id="screen">
+          <canvas id="canvas" tabindex="0" width="1080" height="2400" aria-label="Phone screen"></canvas>
+          <div class="overlay" id="overlay">
+            <div class="overlay-inner">
+              <span id="ovIcon"></span>
+              <p class="overlay-title" id="ovTitle">Connecting</p>
+              <p class="overlay-sub" id="ovSub"></p>
+              <div class="overlay-bar"><i></i></div>
+              <div class="overlay-actions" id="ovActions"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <nav class="tools" aria-label="Phone controls">
+        <button class="tool" type="button" data-nav="back" title="Back (right-click or Esc)" aria-label="Back">
+          <svg viewBox="0 0 24 24"><path d="M16.5 5.5v13L6.5 12z"/></svg>
+        </button>
+        <button class="tool" type="button" data-nav="home" title="Home (middle-click)" aria-label="Home">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.5"/></svg>
+        </button>
+        <button class="tool" type="button" data-nav="recents" title="Recent apps" aria-label="Recent apps">
+          <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+        </button>
+        <hr>
+        <button class="tool" type="button" data-nav="rotate" title="Rotate" aria-label="Rotate">
+          <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v4.5h-4.5"/></svg>
+        </button>
+        <button class="tool" type="button" id="shotBtn" title="Save a screenshot" aria-label="Save a screenshot">
+          <svg viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+        <hr>
+        <button class="tool" type="button" id="restartBtn" title="Restart the app" aria-label="Restart the app">
+          <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 13.66-5.66L20 8.5"/><path d="M20 4v4.5h-4.5"/><path d="M20 12a8 8 0 0 1-13.66 5.66L4 15.5"/><path d="M4 20v-4.5h4.5"/></svg>
+        </button>
+        <button class="tool" type="button" id="clearBtn" title="Clear app data and reopen" aria-label="Clear app data and reopen">
+          <svg viewBox="0 0 24 24"><path d="M4.5 7h15"/><path d="M9.5 7V4.5h5V7"/><path d="M6.5 7l.9 12a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4l.9-12"/></svg>
+        </button>
+        <hr>
+        <button class="tool" type="button" id="fullBtn" data-desktop title="Full screen" aria-label="Full screen">
+          <svg viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>
+        </button>
+      </nav>
+    </div>
+
+    <div class="assist" id="assist" hidden></div>
+    <p class="meta-line" id="metaLine"></p>
+    <p class="hint">Click and drag to swipe. Type on your keyboard to enter text. Right-click goes back. Hold <kbd>Ctrl</kbd> and drag to pinch.</p>
+  </main>
+
+  <dialog class="sheet" id="acctDialog" aria-labelledby="acctDialogTitle">
+    <form id="acctForm" novalidate>
+      <div class="sheet-head">
+        <h2 id="acctDialogTitle">Accounts</h2>
+        <p>Save a login for each role. Anyone who opens this app's link can switch between them with one click, but only you can see the passwords.</p>
+      </div>
+      <div class="sheet-body">
+        <div id="acctEditors"></div>
+        <button class="btn btn-ghost" id="acctAdd" type="button">Add another account</button>
+      </div>
+      <p class="form-error" id="acctError" hidden></p>
+      <div class="sheet-foot">
+        <div class="sheet-foot-left">
+          <button class="btn btn-quiet" id="acctExport" type="button" title="Download all accounts, with passwords, as a file">Export</button>
+          <button class="btn btn-quiet" id="acctImport" type="button" title="Load accounts from an exported file">Import</button>
+          <input type="file" id="acctImportFile" accept=".json,application/json" hidden>
+        </div>
+        <button class="btn btn-quiet" id="acctCancel" type="button">Cancel</button>
+        <button class="btn btn-ink" id="acctSave" type="submit">Save accounts</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/assets/common.js"></script>
+  <script src="/assets/player.js"></script>
+</body>
+</html>

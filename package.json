@@ -1,0 +1,20 @@
+{
+  "name": "handset",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Upload an Android app and use it in the browser on a real, disposable Android phone.",
+  "main": "server/index.js",
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "start": "node server/index.js",
+    "stop-phones": "node scripts/stop-phones.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "type": "commonjs",
+  "dependencies": {
+    "@fontsource-variable/geist": "^5.3.0",
+    "ws": "^8.23.0"
+  }
+}

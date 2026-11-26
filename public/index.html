@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Handset: run Android apps in your browser</title>
+  <meta name="description" content="Upload an APK and use it on a real Android phone in your browser. Share the link so anyone can try it.">
+  <link rel="preload" href="/assets/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <header class="bar">
+    <a class="wordmark" href="/"><span>Handset</span></a>
+    <span class="bar-note" id="poolNote"></span>
+  </header>
+
+  <main class="home">
+    <section class="hero">
+      <div class="hero-copy">
+        <h1>Run any Android app in your browser.</h1>
+        <p class="lede">Upload an APK and you get a real Android phone to tap, swipe and type on. Share the link, and everyone who opens it gets a fresh phone with your app installed.</p>
+
+        <label class="drop" id="drop">
+          <input type="file" id="file" accept=".apk,.apks,.xapk,.apkm" hidden>
+          <span class="drop-mark" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m6.5 9.5 5.5-5.5 5.5 5.5"/><path d="M4 16v2.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V16"/></svg>
+          </span>
+          <span class="drop-text">
+            <span class="drop-title" id="dropTitle">Drop an APK here</span>
+            <span class="drop-sub" id="dropSub">or <u>choose a file</u>. .apk, .apks or .xapk, up to 1 GB.</span>
+          </span>
+          <span class="drop-progress" id="dropProgress"></span>
+        </label>
+        <p class="form-error" id="uploadError" hidden></p>
+      </div>
+
+      <div class="hero-device">
+        <div class="phone">
+          <div class="screen"><img id="heroShot" src="/assets/home.png" alt="An Android phone screen streamed by Handset"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="library" id="library" hidden>
+      <h2>Your apps</h2>
+      <ul class="apps" id="apps"></ul>
+    </section>
+
+    <p class="foot">Every session runs on its own Pixel 7 with Android 15, booted from a clean state. When the session ends the phone is destroyed along with everything on it. Apps you upload are only listed in this browser; anyone you send a link to can open that app.</p>
+  </main>
+
+  <script src="/assets/common.js"></script>
+  <script src="/assets/home.js"></script>
+</body>
+</html>
