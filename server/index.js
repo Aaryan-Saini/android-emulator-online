@@ -32,6 +32,18 @@ function clientIp(req) {
   return req.socket.remoteAddress;
 }
 
+// Someone using Handset on the PC it runs on (http://localhost:PORT) may manage every app's accounts, from any
+// browser. Visitors through a tunnel or reverse proxy also connect from this PC, so they are told apart by the
+// address they typed (Host) and the forwarding headers those add; they still need the uploader's key.
+function localAdmin(req) {
+  if (!cfg.LOCAL_ADMIN) return false;
+  if (!/^(127\.|::1$|::ffff:127\.)/.test(req.socket.remoteAddress || '')) return false;
+  const h = req.headers;
+  if (h['x-forwarded-for'] || h.forwarded || h['x-real-ip'] || h['cf-connecting-ip'] || h['x-forwarded-host']) return false;
+  const host = String(h.host || '').toLowerCase().replace(/:\d+$/, '');
+  return host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+}
+
 function json(res, status, body) {
   const data = JSON.stringify(body);
   res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -102,7 +114,7 @@ async function route(req, res) {
   if ((r = m(/^\/api\/apps\/([\w-]+)$/))) {
     const app = store.get(r[1]);
     if (!app) return json(res, 404, { error: 'This app does not exist or was deleted.' });
-    if (req.method === 'GET') return json(res, 200, { app: store.publicView(app) });
+    if (req.method === 'GET') return json(res, 200, { app: { ...store.publicView(app), canManage: localAdmin(req) } });
     if (req.method === 'DELETE') {
       store.remove(r[1], req.headers['x-owner-key']);
       return json(res, 200, { ok: true });
@@ -111,10 +123,11 @@ async function route(req, res) {
   if ((r = m(/^\/api\/apps\/([\w-]+)\/accounts$/))) {
     if (!store.get(r[1])) return json(res, 404, { error: 'This app does not exist or was deleted.' });
     const key = req.headers['x-owner-key'];
-    if (req.method === 'GET') return json(res, 200, { accounts: store.ownerAccounts(r[1], key) });
+    const admin = localAdmin(req);
+    if (req.method === 'GET') return json(res, 200, { accounts: store.ownerAccounts(r[1], key, { admin }) });
     if (req.method === 'PUT') {
       const body = await readJson(req);
-      return json(res, 200, { accounts: store.setAccounts(r[1], key, body.accounts) });
+      return json(res, 200, { accounts: store.setAccounts(r[1], key, body.accounts, { admin }) });
     }
   }
   if (req.method === 'GET' && (r = m(/^\/api\/apps\/([\w-]+)\/files\/([\w.-]+)$/))) {

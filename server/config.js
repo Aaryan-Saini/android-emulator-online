@@ -118,6 +118,10 @@ module.exports = {
   // Fill sign-in fields through the accessibility helper in vendor/appium-uia2 (instant), instead of typing.
   FAST_FILL: bool('FAST_FILL', true),
 
+  // Anyone using Handset on this PC (http://localhost) can manage every app's accounts, from any browser. Visitors
+  // from other machines or through a tunnel still need the uploader's browser.
+  LOCAL_ADMIN: bool('LOCAL_ADMIN', true),
+
   // Keep phones and sessions running across server restarts (people reconnect instead of losing their session).
   KEEP_PHONES_ON_RESTART: bool('KEEP_PHONES_ON_RESTART', true),
 };

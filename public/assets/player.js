@@ -651,6 +651,8 @@
   // Accounts: one-click "Sign in as" (a panel beside the phone, or a dropdown on small screens)
   // ======================================================================
   const ownerKey = () => Handset.library.ownerKey(appId);
+  // The uploader's browser, or anyone on the PC Handset runs on (the server says so in app.canManage).
+  const canManage = () => Boolean(ownerKey() || (app && app.canManage));
   const acctMenu = $('acctMenu');
   let currentAccount = null; // id of the account the phone is signed in as
   let manual = null; // account being typed in by hand: { id, name, username, hasPassword, extras }
@@ -730,18 +732,25 @@
           { class: 'accounts-empty' },
           el('p', {}, 'Save a login for each role of this app, then switch between them here with one click.'),
           el('button', { class: 'btn btn-ink', type: 'button', onclick: () => openEditor() }, 'Add accounts'),
-          ownerKey() ? tools() : null,
+          canManage() ? tools() : null,
         ),
       ];
     }
-    const nodes = [el('div', { class: 'accounts-list' }, ...accounts.map(accountRow))];
-    if (ownerKey()) nodes.push(tools());
+    const add = el('button', { class: 'acct-add', type: 'button', onclick: () => addAccount() }, el('span', { class: 'acct-add-icon', 'aria-hidden': 'true' }, '+'), 'Add account');
+    const nodes = [el('div', { class: 'accounts-list' }, ...accounts.map(accountRow), add)];
+    if (canManage()) nodes.push(tools());
     return nodes;
+  }
+
+  function addAccount() {
+    if (canManage()) return openEditor({ add: true });
+    closeMenu();
+    toast('Accounts can be added on the computer Handset runs on, or in the browser this app was uploaded from.', 7000);
   }
 
   function renderAccounts() {
     const accounts = (app && app.accounts) || [];
-    const show = accounts.length > 0 || Boolean(ownerKey());
+    const show = accounts.length > 0 || canManage();
     const wasShown = !$('accounts').hidden;
     $('accounts').hidden = !show;
     $('acct').hidden = !show;
@@ -783,7 +792,7 @@
   }
   $('acctBtn').addEventListener('click', (e) => {
     e.stopPropagation();
-    if (!app.accounts.length && ownerKey()) return openEditor();
+    if (!app.accounts.length && canManage()) return openEditor();
     acctMenu.hidden = !acctMenu.hidden;
     $('acctBtn').setAttribute('aria-expanded', String(!acctMenu.hidden));
   });
@@ -809,7 +818,7 @@
 
   function accountEditor(a = { label: '', username: '', password: '', extras: [] }) {
     const ids = [++fieldSeq, ++fieldSeq, ++fieldSeq].map((n) => `acf${n}`);
-    const name = input('in in-name', 'text', 'e.g. Admin, Front desk, Aaryan', a.label, 'name', { id: ids[0] });
+    const name = input('in in-name', 'text', 'e.g. Admin, Front desk, Waiter', a.label, 'name', { id: ids[0] });
     const user = input('in', 'text', 'Email, phone or username', a.username, 'username', { id: ids[1] });
     const pass = input('in', 'password', 'Password', a.password, 'password', { id: ids[2], autocomplete: 'new-password' });
     const eye = el('button', { class: 'icon-btn', type: 'button', title: 'Show password', 'aria-label': 'Show password' });
@@ -853,7 +862,8 @@
     return box;
   }
 
-  async function openEditor() {
+  // `add`: start with a blank account at the end, ready to type into.
+  async function openEditor({ add = false } = {}) {
     closeMenu();
     $('acctError').hidden = true;
     let accounts = [];
@@ -862,9 +872,13 @@
     } catch (e) {
       return toast(e.message);
     }
-    $('acctEditors').replaceChildren(...(accounts.length ? accounts.map((a) => accountEditor(a)) : [accountEditor()]));
+    const blank = add || !accounts.length ? accountEditor() : null;
+    $('acctEditors').replaceChildren(...accounts.map((a) => accountEditor(a)), ...(blank ? [blank] : []));
     dialog.showModal();
-    if (!accounts.length) $('acctEditors').querySelector('[data-k="name"]').focus();
+    if (blank) {
+      blank.scrollIntoView({ block: 'nearest' });
+      blank.querySelector('[data-k="name"]').focus();
+    }
   }
 
   $('acctAdd').addEventListener('click', () => {

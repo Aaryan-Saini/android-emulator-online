@@ -395,6 +395,11 @@ body.player { height: 100vh; height: 100dvh; overflow: hidden; display: flex; fl
 .acct-row.is-current { box-shadow: 0 0 0 2px var(--ink); }
 .acct-row[disabled] { cursor: default; opacity: 0.55; transform: none; }
 .acct-row.is-busy { opacity: 1; box-shadow: 0 0 0 2px var(--accent); }
+.acct-add { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 8px 14px 8px 12px; border: 1.5px dashed #c3bdb1; border-radius: 14px; background: transparent; font: inherit; font-size: 15px; font-weight: 600; color: var(--ink); text-align: left; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+.acct-add:hover { background: #fff; border-color: var(--ink-2); }
+.acct-add:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.acct-add-icon { flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: #fff; box-shadow: 0 0 0 1px var(--line); font-size: 22px; font-weight: 400; line-height: 1; }
+.acct-add:hover .acct-add-icon { box-shadow: 0 0 0 1px #c3bdb1; }
 .avatar {
   flex: none;
   width: 40px;

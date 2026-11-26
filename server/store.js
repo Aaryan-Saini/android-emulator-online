@@ -93,19 +93,21 @@ function signInFields(a) {
 
 const isOwner = (meta, ownerKey) => Boolean(meta && ownerKey && sha256(ownerKey) === meta.ownerHash);
 
-function requireOwner(meta, ownerKey) {
+// `admin`: the request comes from the PC Handset runs on (see localAdmin in index.js), which may manage every app.
+function requireOwner(meta, ownerKey, admin = false) {
+  if (meta && admin) return;
   if (!isOwner(meta, ownerKey)) throw Object.assign(new Error('Only the person who uploaded this app can change its accounts.'), { status: 403 });
 }
 
-function ownerAccounts(id, ownerKey) {
+function ownerAccounts(id, ownerKey, { admin = false } = {}) {
   const meta = get(id);
-  requireOwner(meta, ownerKey);
+  requireOwner(meta, ownerKey, admin);
   return (meta.accounts || []).map(normalizeAccount);
 }
 
-function setAccounts(id, ownerKey, input) {
+function setAccounts(id, ownerKey, input, { admin = false } = {}) {
   const meta = get(id);
-  requireOwner(meta, ownerKey);
+  requireOwner(meta, ownerKey, admin);
   if (!Array.isArray(input) || input.length > 30) throw Object.assign(new Error('Send up to 30 accounts.'), { status: 400 });
   const str = (v, max) => String(v === undefined || v === null ? '' : v).slice(0, max);
   const accounts = input.map((a, i) => {

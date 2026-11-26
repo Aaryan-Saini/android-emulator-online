@@ -4,15 +4,40 @@ Upload an Android app (`.apk`, `.apks` or `.xapk`) and use it in the browser on 
 
 Share the link `/app/<id>` and anyone who opens it gets a new phone with that app installed.
 
-## Run it
+## Run it on your computer
 
-Requirements: Node 18+, the Android SDK with the emulator, an API 30+ "Google APIs" x86_64 system image, build-tools (for `aapt2`), and hardware virtualization (WHPX on Windows, KVM on Linux, HVF on macOS).
+Each person runs their own copy: clone it, set it up once, and it runs on your machine with your own phones, apps and test accounts. Nothing is shared between copies. Uploaded apps, saved accounts and phone data live in `data/`, which stays on your computer and is never committed.
+
+### What you need
+
+- **Hardware virtualization** switched on. The phones are Android emulators, and without it they are unusably slow.
+  - Windows: turn on virtualization in the BIOS, then *Windows Features* → **Windows Hypervisor Platform**, and restart.
+  - Linux: KVM (`/dev/kvm` must be usable by your user).
+  - macOS: nothing to do.
+- **Memory:** each phone uses about 5 GB of RAM while in use, so 16 GB or more is recommended. On 8 GB, run one phone at a time (`MAX_DEVICES=1 WARM_DEVICES=0`, see [Settings](#settings)).
+- **Disk:** about 15 GB free for the Android SDK, the system image and the snapshot.
+- **Node.js 18 or newer.**
+- **Android SDK** with platform-tools, the emulator, build-tools (for `aapt2`) and one API 30+ *Google APIs* system image. The easiest way is to install [Android Studio](https://developer.android.com/studio) and add these in *Settings → Android SDK*. With the command-line tools instead:
+
+  ```bash
+  sdkmanager "platform-tools" "emulator" "build-tools;35.0.0" "system-images;android-35;google_apis;x86_64"
+  ```
+
+  On an Apple silicon Mac use `system-images;android-35;google_apis;arm64-v8a`. Handset finds the SDK in its usual places (`%LOCALAPPDATA%\Android\Sdk`, `~/Library/Android/sdk`, `~/Android/Sdk`); otherwise set `ANDROID_HOME` to it.
+
+### Start
 
 ```bash
+git clone https://github.com/Aaryan-Saini/handset.git
+cd handset
 npm install
 npm run setup     # once: creates the "handset-base" emulator profile and a clean snapshot (5–10 minutes)
 npm start         # http://localhost:3000
 ```
+
+Open [localhost:3000](http://localhost:3000), upload an `.apk`, and the app opens on a phone in the browser. Test accounts for one-click role switching are added from the panel beside the phone. On the computer Handset runs on you can always manage them (see [Test accounts](#test-accounts-switch-roles-in-one-click)).
+
+`npm start` runs the server under a small watcher that restarts it if it ever stops. Phones keep running while the server restarts, so open sessions carry on. To shut everything down, stop the server (<kbd>Ctrl</kbd>+<kbd>C</kbd>) and run `npm run stop-phones`. Setup does not touch your other emulator profiles.
 
 `npm run setup -- --force` rebuilds the snapshot from scratch (stop the server first). Setup tries to draw the phone screen with your graphics card. If that crashes or isn't available it falls back to software rendering at 720×1600, which keeps apps' layout identical (411×914 dp) but halves the CPU work. Force a mode with `--gpu=host` or `--gpu=swiftshader`. The choice is saved in `data/emulator.json`.
 
@@ -26,7 +51,7 @@ browser ──WebSocket────▶ server ──adb────▶ emulator 
    └─ WebCodecs decoder → <canvas>; pointer events → multi-touch
 ```
 
-- **Phones** (`server/pool.js`): emulators boot with `-read-only -snapshot handset_clean`, so each one starts in 10–15 s from the same clean state and nothing is saved. By default no spare phone is kept running (`WARM_DEVICES=0`), so a new session waits about 12 s while its phone boots; set `WARM_DEVICES=1` to keep one ready. After a session the phone is destroyed.
+- **Phones** (`server/pool.js`): emulators boot with `-read-only -snapshot handset_clean`, so each one starts in 10–15 s from the same clean state and nothing is saved. One spare phone is kept ready but frozen (~0% CPU, its memory handed back to the system), so a new session gets a phone in about 2.5 s. A phone whose tab is hidden or closed is frozen the same way and wakes when the visitor returns. After a session the phone is destroyed. If a phone crashes, its session moves to a fresh phone with the same app.
 - **Sessions** (`server/sessions.js`): queue → install (`adb install`, or `install-multiple` for bundles) → launch → stream. There is no time limit by default: a session lasts while the tab is open, and ends when the visitor clicks *End session* or `IDLE_SECONDS` after the tab closes. A page refresh reconnects to the same phone.
 - **Streaming** (`server/scrcpy.js`): runs the bundled scrcpy-server 5.0.1 on the phone and forwards its H.264 stream over the WebSocket. Each browser asks for exactly the resolution it displays (and asks again on full screen), because the phone's video encoder shares the CPU with the app. If a visitor's connection falls behind, frames are dropped up to the next keyframe so lag never builds up.
 - **CPU priority**: the phone someone is using runs at above-normal priority, and spare phones waiting for the next visitor run below normal.
@@ -48,7 +73,7 @@ The frame's side buttons are clickable (power, volume up/down). The toolbar also
 
 ## Test accounts (switch roles in one click)
 
-The person who uploaded an app can save logins for each role (for example *Admin* and *Front desk*) from **Add test accounts** / **Manage accounts** in the player's header. Anyone who opens the app's link then gets a **Sign in as** menu and can switch roles in one click. They never see the passwords; only the uploader can view or change them (stored in `data/apps/<id>/meta.json` on the server).
+Save a login for each role of an app (for example *Admin* and *Front desk*) with **+ Add account** in the panel beside the phone. **Export** / **Import** move them between apps or computers as a file (it contains the passwords). Anyone who opens the app's link then gets the **Sign in as** list and can switch roles in one click. They never see the passwords. Accounts can be added or changed from any browser on the computer Handset runs on (`http://localhost`), or from the browser that uploaded the app; visitors from other machines cannot. They are stored in `data/apps/<id>/meta.json`.
 
 What happens on **Sign in as** (`server/autologin.js`):
 
@@ -77,6 +102,7 @@ All optional, as environment variables:
 | `VIDEO_BITRATE` | `8000000` | Video bitrate |
 | `GRANT_PERMISSIONS` | `false` | `true` grants every runtime permission at install (skips permission prompts) |
 | `FAST_FILL` | `true` | Fill sign-in fields instantly through the accessibility helper in `vendor/appium-uia2` (falls back to typing) |
+| `LOCAL_ADMIN` | `true` | Anyone using Handset on the computer it runs on (`http://localhost`) can add and change every app's accounts, from any browser. Visitors from other machines or through a tunnel still need the uploader's browser |
 | `KEEP_PHONES_ON_RESTART` | `true` | Phones and sessions keep running while the server restarts; visitors reconnect automatically. `npm run stop-phones` stops them |
 | `TRUST_PROXY` | unset | Set when behind a reverse proxy so per-visitor limits use `X-Forwarded-For` |
 | `ANDROID_HOME` | auto | Android SDK location |
