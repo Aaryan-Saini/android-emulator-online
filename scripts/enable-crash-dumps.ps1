@@ -1,5 +1,5 @@
 # Makes Windows keep a small crash dump (a few MB) whenever a phone's emulator crashes, in data\crash-dumps.
-# Handset reads it and writes where the crash happened to data\logs\crashes.log.
+# Android Emulator Online reads it and writes where the crash happened to data\logs\crashes.log.
 # Needs administrator rights once (Windows only reads this setting machine-wide). Undo: add -Off.
 param([switch]$Off)
 

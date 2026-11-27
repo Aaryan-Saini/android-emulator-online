@@ -32,7 +32,7 @@ function clientIp(req) {
   return req.socket.remoteAddress;
 }
 
-// Someone using Handset on the PC it runs on (http://localhost:PORT) may manage every app's accounts, from any
+// Someone using Android Emulator Online on the PC it runs on (http://localhost:PORT) may manage every app's accounts, from any
 // browser. Visitors through a tunnel or reverse proxy also connect from this PC, so they are told apart by the
 // address they typed (Host) and the forwarding headers those add; they still need the uploader's key.
 function localAdmin(req) {
@@ -230,7 +230,7 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 server.listen(cfg.PORT, cfg.HOST, async () => {
-  log('server', `Handset running at http://localhost:${cfg.PORT}`);
+  log('server', `Android Emulator Online running at http://localhost:${cfg.PORT}`);
   await pool.start();
   sessions.restore();
 });

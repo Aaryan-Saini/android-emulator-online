@@ -1,8 +1,10 @@
 {
-  "name": "handset",
+  "name": "android-emulator-online",
   "version": "1.0.0",
   "private": true,
-  "description": "Upload an Android app and use it in the browser on a real, disposable Android phone.",
+  "description": "Android emulator online: run any Android app (APK) in your browser on a real, disposable Android phone. Self-hosted, with one-click test accounts.",
+  "keywords": ["android", "android-emulator", "emulator", "online-emulator", "apk", "run-apk-online", "browser", "app-testing", "scrcpy", "webcodecs", "self-hosted", "appetize-alternative"],
+  "repository": { "type": "git", "url": "https://github.com/Aaryan-Saini/android-emulator-online.git" },
   "main": "server/index.js",
   "scripts": {
     "setup": "node scripts/setup.js",

@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#f2f0eb">
-  <title>Handset</title>
+  <title>Android Emulator Online</title>
   <link rel="preload" href="/assets/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body class="player">
   <header class="bar">
-    <a class="wordmark" href="/" title="Back to Handset"><span>Handset</span></a>
+    <a class="wordmark" href="/" title="Back to the home page"><span>Android Emulator Online</span></a>
     <span class="divider"></span>
     <div class="app-id">
       <span id="appIcon"></span>
@@ -26,7 +26,13 @@
         </button>
         <div class="menu" id="acctMenu" role="menu" hidden></div>
       </div>
-      <select class="btn btn-ghost phone-kind" id="phoneKind" aria-label="Kind of phone" hidden></select>
+      <div class="kind" id="phoneKind" hidden>
+        <button class="btn btn-ghost" id="phoneKindBtn" type="button" aria-haspopup="menu" aria-expanded="false">
+          <span id="phoneKindLabel">Standard phone</span>
+          <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
+        </button>
+        <div class="menu kind-menu" id="phoneKindMenu" role="menu" aria-label="Kind of phone" hidden></div>
+      </div>
       <button class="btn btn-ghost" id="shareBtn" type="button">Copy link</button>
       <button class="btn btn-ink" id="endBtn" type="button">End session</button>
     </div>

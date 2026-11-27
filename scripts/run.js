@@ -1,4 +1,4 @@
-// Runs the Handset server and starts it again within a second if it ever stops unexpectedly. Phones and sessions
+// Runs the Android Emulator Online server and starts it again within a second if it ever stops unexpectedly. Phones and sessions
 // survive server restarts, so visitors only see a brief "Reconnecting".   npm start
 const path = require('path');
 const { spawn } = require('child_process');

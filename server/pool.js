@@ -469,7 +469,7 @@ class DevicePool extends EventEmitter {
       await sleep(500);
     }
     if (Date.now() >= deadline) throw new Error('timed out');
-    // Root lets Handset save and restore app sign-ins. adbd restarts, so do it before anything connects.
+    // Root lets Android Emulator Online save and restore app sign-ins. adbd restarts, so do it before anything connects.
     await adb(device.serial, ['root'], { timeout: 20000 }).catch(() => {});
     await adb(device.serial, ['wait-for-device'], { timeout: 30000 }).catch(() => {});
     for (let i = 0; i < 20; i++) {

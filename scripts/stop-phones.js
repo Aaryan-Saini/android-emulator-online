@@ -1,4 +1,4 @@
-// Stops every Handset phone. Phones keep running when the server stops (so restarts don't end sessions);
+// Stops every Android Emulator Online phone. Phones keep running when the server stops (so restarts don't end sessions);
 // run this when you want them gone:  npm run stop-phones
 const fs = require('fs');
 const path = require('path');
@@ -16,5 +16,5 @@ const { adb } = require('../server/adb');
     }
   }
   for (const f of ['devices.json', 'sessions.json']) fs.rmSync(path.join(cfg.DATA, f), { force: true });
-  console.log(n ? `Stopped ${n} phone(s).` : 'No Handset phones were running.');
+  console.log(n ? `Stopped ${n} phone(s).` : 'No Android Emulator Online phones were running.');
 })();

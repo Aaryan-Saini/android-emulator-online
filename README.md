@@ -2,16 +2,16 @@
 
 <img src="public/assets/favicon.svg" width="64" height="64" alt="">
 
-# Handset
+# Android Emulator Online
 
-**Upload an Android app. Use it in your browser, on a real phone.**
+**Run any Android app (APK) in your browser, on a real Android phone.**
 
-Tap, swipe, type and switch test accounts in one click.<br>
-Everyone who opens the link gets their own fresh phone.
+A free, self-hosted Android emulator you open in a browser tab. Tap, swipe, type and switch test accounts in one click.<br>
+Share the link and everyone who opens it gets their own fresh phone with your app. An open-source alternative to Appetize.
 
 <br>
 
-<img src="docs/screenshot-player.png" alt="Handset in the browser: an Android phone running a gallery app, with a list of test accounts to sign in as on the left" width="100%">
+<img src="docs/screenshot-player.png" alt="Android Emulator Online in the browser: an Android phone running a gallery app, with a list of test accounts to sign in as on the left" width="100%">
 
 </div>
 
@@ -31,8 +31,8 @@ Everyone who opens the link gets their own fresh phone.
 You need Node.js 18+, the Android SDK and about 16 GB of RAM. [Details below](#what-you-need).
 
 ```bash
-git clone https://github.com/Aaryan-Saini/handset.git
-cd handset
+git clone https://github.com/Aaryan-Saini/android-emulator-online.git
+cd android-emulator-online
 npm install
 npm run setup     # once, 5–10 min: builds a clean phone to start from
 npm start         # → http://localhost:3000
@@ -40,7 +40,7 @@ npm start         # → http://localhost:3000
 
 Open **[localhost:3000](http://localhost:3000)**, drop in an APK, and your app opens on a phone.
 
-<img src="docs/screenshot-home.png" alt="Handset home page: 'Run any Android app in your browser' with a box to drop an APK" width="100%">
+<img src="docs/screenshot-home.png" alt="Home page: 'Run any Android app in your browser' with a box to drop an APK" width="100%">
 
 Each person runs their own copy. Your apps, accounts and phones stay on your computer, in `data/`, which is never committed.
 
@@ -60,7 +60,7 @@ Each person runs their own copy. Your apps, accounts and phones stay on your com
 
 The bar beside the phone has back, home, recent apps, rotate, screenshot, restart app, clear app data and full screen.
 
-**Test accounts.** Click **+ Add account** beside the phone, give it a name, username and password, then switch roles with one click. Handset signs out, reopens the app, taps through intro screens and fills the sign-in form for you. After the first time, switching back to an account takes a few seconds. Drag accounts to reorder them, and use **Export / Import** to move them between computers. Accounts can be changed on the computer Handset runs on, or in the browser that uploaded the app. Visitors from elsewhere only get the one-click list.
+**Test accounts.** Click **+ Add account** beside the phone, give it a name, username and password, then switch roles with one click. Android Emulator Online signs out, reopens the app, taps through intro screens and fills the sign-in form for you. After the first time, switching back to an account takes a few seconds. Drag accounts to reorder them, and use **Export / Import** to move them between computers. Accounts can be changed on the computer Android Emulator Online runs on, or in the browser that uploaded the app. Visitors from elsewhere only get the one-click list.
 
 <br>
 
@@ -68,7 +68,7 @@ The bar beside the phone has back, home, recent apps, rotate, screenshot, restar
 
 ```mermaid
 flowchart LR
-  B["Your browser"] -- "touch, keys, clipboard" --> S["Handset server"]
+  B["Your browser"] -- "touch, keys, clipboard" --> S["Server on your computer"]
   S -- "adb" --> P["Android phone<br/>(emulator)"]
   P -- "H.264 video" --> S
   S -- "WebSocket" --> B
@@ -92,7 +92,7 @@ flowchart LR
   sdkmanager "platform-tools" "emulator" "build-tools;35.0.0" "system-images;android-35;google_apis;x86_64"
   ```
 
-  On an Apple silicon Mac use `system-images;android-35;google_apis;arm64-v8a`. Handset finds the SDK in its usual place, or set `ANDROID_HOME`.
+  On an Apple silicon Mac use `system-images;android-35;google_apis;arm64-v8a`. Android Emulator Online finds the SDK in its usual place, or set `ANDROID_HOME`.
 
 <br>
 
@@ -118,7 +118,7 @@ Everything works out of the box. To change something, put it in `data/settings.j
 | `VIDEO_BITRATE` | `8000000` | Video bitrate |
 | `GRANT_PERMISSIONS` | `false` | Grant every permission at install, skipping permission prompts |
 | `FAST_FILL` | `true` | Fill sign-in fields instantly, falling back to typing |
-| `LOCAL_ADMIN` | `true` | Anyone on the computer Handset runs on can manage every app's accounts |
+| `LOCAL_ADMIN` | `true` | Anyone on the computer Android Emulator Online runs on can manage every app's accounts |
 | `GUEST_ANGLE` | `true` | Apps draw through ANGLE inside the phone (smoother, and avoids a renderer that crashed phones) |
 | `PHONE_WIFI` | `false` | Phones go online over mobile data, which stays connected after a phone wakes up |
 | `KEEP_PHONES_ON_RESTART` | `true` | Phones and sessions survive a server restart |
@@ -146,8 +146,8 @@ For a permanent setup, put it behind a TLS reverse proxy (Caddy, nginx) with Web
 <br>
 
 - `npm start` keeps the server running and restarts it if it stops. Phones keep running across restarts. Stop everything with `Ctrl+C`, then `npm run stop-phones`.
-- `npm run setup -- --force` rebuilds the phone snapshot. Setup tries your graphics card first and falls back to software drawing. In software mode the screen is 464×1024, the largest size the video is ever sent at, so the CPU draws no pixels nobody sees; apps get the same layout as a Pixel 7 (412×910 dp). Force a mode with `--gpu=host` or `--gpu=swiftshader`, and a screen size with `--screen=WxH@dpi`. `--avd=<name>` builds into a separate profile while phones are running, and Handset switches to it on its next restart.
-- **Light phones for weak PCs:** add a second kind of phone built from Google's slim test image (ATD): `sdkmanager "system-images;android-35;google_atd;x86_64"`, then `npm run setup -- --tag=google_atd --ram=2048 --avd=handset-light --as=light --no-switch`. Visitors then pick **Standard phone** or **Light phone** in the page header (remembered per browser). Measured against the standard phone: 1.4 GB less RAM (about 2.5 GB per phone) and apps start faster. Apps look the same, but a light phone has no status bar, no gesture navigation and no Settings app; Home and Back use the buttons beside the phone, and Handset reopens the app instead of showing the image's empty black home screen. Spare phones are always standard (`DEFAULT_PHONE` changes that).
+- `npm run setup -- --force` rebuilds the phone snapshot. Setup tries your graphics card first and falls back to software drawing. In software mode the screen is 464×1024, the largest size the video is ever sent at, so the CPU draws no pixels nobody sees; apps get the same layout as a Pixel 7 (412×910 dp). Force a mode with `--gpu=host` or `--gpu=swiftshader`, and a screen size with `--screen=WxH@dpi`. `--avd=<name>` builds into a separate profile while phones are running, and Android Emulator Online switches to it on its next restart.
+- **Light phones for weak PCs:** add a second kind of phone built from Google's slim test image (ATD): `sdkmanager "system-images;android-35;google_atd;x86_64"`, then `npm run setup -- --tag=google_atd --ram=2048 --avd=handset-light --as=light --no-switch`. Visitors then pick **Standard phone** or **Light phone** in the page header (remembered per browser). Measured against the standard phone: 1.4 GB less RAM (about 2.5 GB per phone) and apps start faster. Apps look the same, but a light phone has no status bar, no gesture navigation and no Settings app; Home and Back use the buttons beside the phone, and Android Emulator Online reopens the app instead of showing the image's empty black home screen. Spare phones are always standard (`DEFAULT_PHONE` changes that).
 - On Windows, run `scripts\defender-exclusions.ps1` once as administrator so Defender stops scanning every file the emulator touches. Phones start faster and their first minute is smoother. `-Off` undoes it.
 - If a phone crashes, its session moves to a fresh phone with the same app, and the crash is logged in `data/logs/crashes.log`. On Windows, run `scripts\enable-crash-dumps.ps1` once as administrator to also record where it crashed.
 

@@ -93,7 +93,7 @@ function signInFields(a) {
 
 const isOwner = (meta, ownerKey) => Boolean(meta && ownerKey && sha256(ownerKey) === meta.ownerHash);
 
-// `admin`: the request comes from the PC Handset runs on (see localAdmin in index.js), which may manage every app.
+// `admin`: the request comes from the PC Android Emulator Online runs on (see localAdmin in index.js), which may manage every app.
 function requireOwner(meta, ownerKey, admin = false) {
   if (meta && admin) return;
   if (!isOwner(meta, ownerKey)) throw Object.assign(new Error('Only the person who uploaded this app can change its accounts.'), { status: 403 });

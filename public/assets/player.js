@@ -359,7 +359,7 @@
           busy: false,
           actions: [
             el('button', { class: 'btn btn-ink', type: 'button', onclick: () => startNew() }, 'Start a new session'),
-            el('a', { class: 'btn btn-ghost', href: '/' }, 'Back to Handset'),
+            el('a', { class: 'btn btn-ghost', href: '/' }, 'Back to the home page'),
           ],
         });
       case 'replaced':
@@ -410,33 +410,57 @@
   // ---------- kind of phone (standard, or light: less memory, no status bar) ----------
   const PHONE_KEY = 'handset.phone';
   const PHONE_LABELS = {
-    standard: ['Standard phone', 'Full Android 15, looks like a real phone'],
-    light: ['Light phone', 'Uses about 1.4 GB less memory and starts apps faster. No status bar or gesture navigation'],
+    standard: ['Standard phone', 'Full Android 15 that looks and works like a real phone, with the status bar and swipe gestures. Uses about 4 GB of memory.'],
+    light: ['Light phone', 'Uses about 2.5 GB of memory and opens apps faster. Your app looks the same, but there is no status bar or swipe gestures: use the buttons beside the phone.'],
   };
+  const KIND_CHECK = '<svg class="kind-check" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
+  const kindLabel = (k) => (PHONE_LABELS[k] || [`${k[0].toUpperCase()}${k.slice(1)} phone`])[0];
   let phoneNow = null;
+  let phoneKinds = [];
   function renderPhoneKind(msg) {
-    const select = $('phoneKind');
-    const kinds = Array.isArray(msg.phones) ? msg.phones : [];
-    select.hidden = kinds.length < 2 || msg.state === 'ended';
-    if (select.hidden || (msg.phone === phoneNow && select.options.length === kinds.length)) return;
+    phoneKinds = Array.isArray(msg.phones) ? msg.phones : [];
+    $('phoneKind').hidden = phoneKinds.length < 2 || msg.state === 'ended';
+    if ($('phoneKind').hidden) return closeKindMenu();
     phoneNow = msg.phone;
-    select.replaceChildren(
-      ...kinds.map((k) => {
-        const [label, hint] = PHONE_LABELS[k] || [`${k[0].toUpperCase()}${k.slice(1)} phone`, ''];
-        return el('option', { value: k, title: hint, selected: k === msg.phone || undefined }, label);
+    $('phoneKindLabel').textContent = kindLabel(msg.phone);
+    $('phoneKindMenu').replaceChildren(
+      ...phoneKinds.map((k) => {
+        const item = el(
+          'button',
+          { class: `kind-item${k === phoneNow ? ' is-current' : ''}`, type: 'button', role: 'menuitemradio', 'aria-checked': String(k === phoneNow), onclick: () => chooseKind(k) },
+          el('span', { class: 'kind-text' }, el('strong', {}, kindLabel(k)), PHONE_LABELS[k] ? el('span', { class: 'kind-desc' }, PHONE_LABELS[k][1]) : null),
+        );
+        item.insertAdjacentHTML('beforeend', KIND_CHECK);
+        return item;
       }),
     );
-    select.value = msg.phone;
-    select.title = (PHONE_LABELS[msg.phone] || [])[1] || '';
   }
-  $('phoneKind').addEventListener('change', async (e) => {
-    const kind = e.target.value;
+  function closeKindMenu() {
+    $('phoneKindMenu').hidden = true;
+    $('phoneKindBtn').setAttribute('aria-expanded', 'false');
+  }
+  $('phoneKindBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const menu = $('phoneKindMenu');
+    menu.hidden = !menu.hidden;
+    $('phoneKindBtn').setAttribute('aria-expanded', String(!menu.hidden));
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#phoneKind')) closeKindMenu();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || $('phoneKindMenu').hidden) return;
+    e.stopPropagation(); // Esc closes the menu here; it must not also press Back on the phone
+    closeKindMenu();
+  }, true);
+  async function chooseKind(kind) {
+    closeKindMenu();
     localStorage.setItem(PHONE_KEY, kind);
     if (kind === phoneNow) return;
-    toast(`Starting a ${((PHONE_LABELS[kind] || [kind])[0]).toLowerCase()} with your app…`);
+    toast(`Starting a ${kindLabel(kind).toLowerCase()} with your app…`);
     if (sessionId) await api(`/api/sessions/${sessionId}`, { method: 'DELETE' }).catch(() => {});
     startNew();
-  });
+  }
 
   async function startNew() {
     sessionStorage.removeItem(storeKey);
@@ -817,7 +841,7 @@
   // Accounts: one-click "Sign in as" (a panel beside the phone, or a dropdown on small screens)
   // ======================================================================
   const ownerKey = () => Handset.library.ownerKey(appId);
-  // The uploader's browser, or anyone on the PC Handset runs on (the server says so in app.canManage).
+  // The uploader's browser, or anyone on the PC this runs on (the server says so in app.canManage).
   const canManage = () => Boolean(ownerKey() || (app && app.canManage));
   const acctMenu = $('acctMenu');
   let currentAccount = null; // id of the account the phone is signed in as
@@ -1032,7 +1056,7 @@
   function addAccount() {
     if (canManage()) return openEditor({ add: true });
     closeMenu();
-    toast('Accounts can be added on the computer Handset runs on, or in the browser this app was uploaded from.', 7000);
+    toast('Accounts can be added on the computer this runs on, or in the browser this app was uploaded from.', 7000);
   }
 
   function renderAccounts() {
@@ -1226,7 +1250,7 @@
       list = Array.isArray(data) ? data : data.accounts;
       if (!Array.isArray(list)) throw new Error();
     } catch {
-      return toast('That file is not a Handset accounts export.');
+      return toast('That file is not an accounts export.');
     }
     const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
     const incoming = list
@@ -1303,7 +1327,7 @@
       $('appName').textContent = 'App not found';
       return setState('missing');
     }
-    document.title = `${app.name} on Handset`;
+    document.title = `${app.name} · Android Emulator Online`;
     $('appIcon').replaceChildren(icon(app, 34));
     $('appName').textContent = app.name;
     $('appMeta').textContent = [app.versionName && `Version ${app.versionName}`, app.package].filter(Boolean).join(' · ');
@@ -1314,7 +1338,7 @@
     if (!window.isSecureContext) {
       return setState('unsupported', {
         message: 'This page needs a secure connection',
-        sub: 'Browsers only decode video on HTTPS pages or on localhost. Open Handset through an https:// address.',
+        sub: 'Browsers only decode video on HTTPS pages or on localhost. Open this page through an https:// address.',
       });
     }
     if (!('VideoDecoder' in window)) {

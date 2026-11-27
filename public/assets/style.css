@@ -79,8 +79,19 @@ img { display: block; }
 .btn-ink { background: var(--ink); color: var(--paper); }
 .btn-ink:hover { background: #2b2b2b; }
 .btn-ghost { background: transparent; border-color: var(--line); }
-.phone-kind { appearance: none; -webkit-appearance: none; padding-right: 34px; font: inherit; font-size: 14px; font-weight: 520; color: var(--ink); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23555' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; background-size: 16px; }
-.phone-kind[hidden] { display: none; }
+.kind { position: relative; }
+.kind[hidden] { display: none; }
+.kind .chev { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; margin-right: -4px; }
+.kind-menu { width: 340px; padding: 6px; display: grid; gap: 2px; }
+.kind-menu[hidden] { display: none; }
+.kind-item { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 12px; border: 0; border-radius: 12px; background: transparent; font: inherit; color: var(--ink); text-align: left; cursor: pointer; transition: background 0.15s; }
+.kind-item:hover { background: var(--paper-2); }
+.kind-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.kind-text { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.kind-text strong { font-size: 15px; font-weight: 600; }
+.kind-desc { font-size: 13px; line-height: 1.45; color: var(--muted); }
+.kind-check { flex: none; width: 18px; height: 18px; margin-top: 1px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; visibility: hidden; }
+.kind-item.is-current .kind-check { visibility: visible; }
 .btn-ghost:hover { background: var(--paper-2); }
 .btn-quiet { background: transparent; color: var(--muted); padding: 0 10px; }
 .btn-quiet:hover { color: var(--ink); }
@@ -358,7 +369,7 @@ body.player { height: 100vh; height: 100dvh; overflow: hidden; display: flex; fl
 .overlay .btn-ghost:hover { background: rgba(255, 255, 255, 0.08); }
 @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
 
-/* while Handset signs in, the phone stays visible underneath a small status card */
+/* while a sign-in runs, the phone stays visible underneath a small status card */
 .screen.has-frame .overlay.watch { background: rgba(0, 0, 0, 0.08); backdrop-filter: none; -webkit-backdrop-filter: none; align-items: end; }
 .overlay.watch .overlay-inner { background: rgba(14, 14, 14, 0.9); padding: 16px 20px 18px; border-radius: 16px; margin-bottom: 9%; max-width: 86%; gap: 6px; }
 .overlay.watch #ovIcon { display: none; }
@@ -538,7 +549,7 @@ body.player { height: 100vh; height: 100dvh; overflow: hidden; display: flex; fl
 /* phones and small screens: the stream fills the viewport */
 @media (max-width: 700px), (pointer: coarse) and (max-height: 900px) and (max-width: 1024px) {
   .player .bar { height: 52px; padding: 0 12px; gap: 10px; }
-  .player .wordmark span, .player .divider, #shareBtn { display: none; }
+  .player .wordmark span, .player .divider, #shareBtn, .kind { display: none !important; }
   .app-id .icon { --s: 28px; }
   .bar-actions .btn { height: 34px; padding: 0 12px; }
   .stage { padding: 0; gap: 0; justify-content: flex-start; }

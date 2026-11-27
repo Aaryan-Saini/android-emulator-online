@@ -154,7 +154,7 @@
       const img = new Image();
       img.onload = () => {
         $('heroShot').src = img.src;
-        $('heroShot').alt = `${withShot.name} running in Handset`;
+        $('heroShot').alt = `${withShot.name} running on Android Emulator Online`;
       };
       img.src = withShot.screenshot;
     }

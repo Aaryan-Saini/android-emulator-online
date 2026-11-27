@@ -1,4 +1,4 @@
-// One-time setup: creates the emulator profile Handset uses and saves the clean snapshot every session boots from.
+// One-time setup: creates the emulator profile Android Emulator Online uses and saves the clean snapshot every session boots from.
 // It tries the fastest graphics mode first (the computer's GPU) and falls back to software rendering.
 //   npm run setup                        create if missing
 //   npm run setup -- --force             rebuild from scratch
@@ -246,7 +246,7 @@ async function main() {
   fs.mkdirSync(path.dirname(cfg.EMULATOR_FILE), { recursive: true });
   fs.writeFileSync(cfg.EMULATOR_FILE, JSON.stringify(next, null, 2));
   if (noSwitch) return console.log(`Built profile "${AVD}" (${summary})${AS_KIND ? ` as the "${AS_KIND}" phone` : ''}. The default phone is unchanged.`);
-  console.log(`Done (${summary}). Start Handset with: npm start`);
+  console.log(`Done (${summary}). Start Android Emulator Online with: npm start`);
 }
 
 main().catch((e) => {
