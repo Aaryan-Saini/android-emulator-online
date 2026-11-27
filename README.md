@@ -7,7 +7,7 @@
 **Run any Android app (APK) in your browser, on a real Android phone.**
 
 A free, self-hosted Android emulator you open in a browser tab. Tap, swipe, type and switch test accounts in one click.<br>
-Share the link and everyone who opens it gets their own fresh phone with your app. An open-source alternative to Appetize.
+Share the link and everyone who opens it gets their own fresh phone with your app. A self-hosted alternative to Appetize.
 
 <br>
 
