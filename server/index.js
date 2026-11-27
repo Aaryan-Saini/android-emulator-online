@@ -140,7 +140,7 @@ async function route(req, res) {
   if (req.method === 'POST' && (r = m(/^\/api\/apps\/([\w-]+)\/sessions$/))) {
     const app = store.get(r[1]);
     if (!app) return json(res, 404, { error: 'This app does not exist or was deleted.' });
-    const session = sessions.create(app, clientIp(req));
+    const session = sessions.create(app, clientIp(req), url.searchParams.get('phone'));
     return json(res, 201, { session: session.status() });
   }
   if ((r = m(/^\/api\/sessions\/([\w-]+)$/))) {

@@ -29,10 +29,11 @@ function friendlyInstallError(text) {
 }
 
 class Session {
-  constructor(app, ip) {
+  constructor(app, ip, phone) {
     this.id = newId(18);
     this.app = app;
     this.ip = ip;
+    this.phone = cfg.phoneKind(phone); // kind of phone chosen (cfg.PHONES), e.g. standard or light
     this.state = 'queued';
     this.message = '';
     this.device = null;
@@ -54,6 +55,8 @@ class Session {
       expiresAt: this.expiresAt,
       account: this.signedInAs || null,
       device: this.device ? { name: 'Pixel 7', android: '15' } : null,
+      phone: this.phone,
+      phones: Object.keys(cfg.PHONES),
     };
   }
 }
@@ -88,16 +91,16 @@ class SessionManager {
     return [...this.sessions.values()].filter((s) => s.state !== 'ended');
   }
 
-  create(app, ip) {
+  create(app, ip, phone) {
     const mine = this.active().filter((s) => s.ip === ip);
     if (mine.length >= cfg.MAX_SESSIONS_PER_IP) {
       const err = new Error(`You already have ${mine.length} phone${mine.length > 1 ? 's' : ''} running. End one before starting another.`);
       err.status = 429;
       throw err;
     }
-    const session = new Session(app, ip);
+    const session = new Session(app, ip, phone);
     this.sessions.set(session.id, session);
-    log('session', `${session.id.slice(0, 6)} created for ${app.package}`);
+    log('session', `${session.id.slice(0, 6)} created for ${app.package} (${session.phone} phone)`);
     this.armIdle(session);
     this.run(session).catch((err) => {
       log('session', `${session.id.slice(0, 6)} failed: ${err.message}`);
@@ -135,6 +138,7 @@ class SessionManager {
       expiresAt: s.expiresAt,
       signedInAs: s.signedInAs || null,
       maxSize: s.maxSize || null,
+      phone: s.phone,
     }));
     try {
       fs.mkdirSync(cfg.DATA, { recursive: true });
@@ -155,7 +159,7 @@ class SessionManager {
       const app = store.get(x.appId);
       if (!app) continue;
       const device = x.serial ? this.pool.adopted(x.serial) : null;
-      const s = new Session(app, x.ip);
+      const s = new Session(app, x.ip, x.phone);
       Object.assign(s, { id: x.id, createdAt: x.createdAt, expiresAt: x.expiresAt, maxSize: x.maxSize || undefined });
       this.sessions.set(s.id, s);
       if (s.expiresAt) s.timers.expire = setTimeout(() => this.end(s, 'Your session reached its time limit.'), Math.max(1000, s.expiresAt - Date.now()));
@@ -163,6 +167,9 @@ class SessionManager {
       if (device && !claimed.has(device)) {
         claimed.add(device);
         s.device = device;
+        // Its kind of phone is whatever it actually runs on (sessions saved before kinds existed have none).
+        const kind = Object.keys(cfg.PHONES).find((k) => cfg.PHONES[k] === device.avd);
+        if (kind) s.phone = kind;
         if (x.state === 'running') {
           Object.assign(s, { state: 'running', signedInAs: x.signedInAs });
           log('session', `${s.id.slice(0, 6)} restored on ${device.serial} after a restart`);
@@ -250,6 +257,30 @@ class SessionManager {
     const { app, device } = session;
     if (!cfg.GUEST_ANGLE || !device || !SAFE_NAME.test(app.package)) return;
     await shell(device.serial, `settings put global angle_gl_driver_selection_pkgs '${app.package}'; settings put global angle_gl_driver_selection_values angle`, { timeout: 10000 }).catch(() => {});
+  }
+
+  // Slim phones (Google's ATD image) have no home screen, only a black placeholder (EmptyHomeActivity). Home, or
+  // Back out of the app, would leave visitors on a black screen, so there Home reopens the app, and after a Back
+  // that lands on the placeholder the app is brought back, like a person tapping its icon again.
+  async hasEmptyHome(device) {
+    if (device.emptyHome === undefined) {
+      const out = await shell(device.serial, 'cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME', { timeout: 8000 }).catch(() => '');
+      if (/EmptyHomeActivity|fakesystemapp|No activity found/i.test(out)) device.emptyHome = true;
+      else if (/\//.test(out)) device.emptyHome = false;
+    }
+    return Boolean(device.emptyHome);
+  }
+
+  keepAppInFront(session) {
+    const device = session.device;
+    if (!device || session.state !== 'running') return;
+    clearTimeout(session.timers.front);
+    session.timers.front = setTimeout(async () => {
+      if (session.device !== device || session.state !== 'running' || session.login) return;
+      if (!(await this.hasEmptyHome(device))) return;
+      const top = await shell(device.serial, 'dumpsys activity activities | grep -m1 topResumedActivity', { timeout: 8000 }).catch(() => '');
+      if (/EmptyHomeActivity/.test(top) || !/ActivityRecord/.test(top)) this.launch(session).catch(() => {});
+    }, 900);
   }
 
   async launch(session) {
@@ -628,16 +659,20 @@ class SessionManager {
     if (session.device && session.device.paused) await this.pool.resume(session.device);
   }
 
-  // The visitor's tab was hidden or shown again. Hidden: stop the video, and after a while freeze the phone.
+  // The visitor's tab was hidden or shown again. Switching to another tab and back must be instant, so the video
+  // keeps running and the phone stays awake for PAUSE_HIDDEN_SECONDS (stopping the video at once meant 1-2 s of a
+  // frozen picture on every return). Only after that is the video stopped and the phone frozen (0% CPU).
   onVisibility(session, hidden) {
     session.hidden = hidden;
     clearTimeout(session.timers.pause);
     if (hidden) {
-      this.stopStream(session);
       session.timers.pause = setTimeout(() => {
-        if (session.hidden && !session.login && session.device) this.pool.pause(session.device);
+        if (!session.hidden) return;
+        this.stopStream(session);
+        if (!session.login && session.device) this.pool.pause(session.device);
       }, cfg.PAUSE_HIDDEN_SECONDS * 1000);
     } else if (session.device && session.client) {
+      if (session.stream && !session.device.paused) return; // still live: nothing to restart
       const ws = session.client;
       this.wake(session).then(() => session.client === ws && !session.hidden && this.startStream(session));
     }
@@ -736,6 +771,7 @@ class SessionManager {
           const meta = n(m.m, 0, 0x7fffffff) | 0;
           if (m.a === 0 || m.a === 1) s.key(m.a, code, meta, n(m.r, 0, 1000) | 0);
           else s.press(code, meta);
+          if ((code === 4 || code === 3) && m.a !== 0) this.keepAppInFront(session);
         }
         break;
       case 'text':
@@ -749,7 +785,9 @@ class SessionManager {
         break;
       case 'nav':
         if (!s) break;
-        if (KEYCODE[m.k]) s.press(KEYCODE[m.k]);
+        if (m.k === 'home' && session.device && session.device.emptyHome) this.launch(session).catch(() => {}); // see keepAppInFront
+        else if (KEYCODE[m.k]) s.press(KEYCODE[m.k]);
+        if (m.k === 'back' || m.k === 'home') this.keepAppInFront(session);
         else if (m.k === 'rotate') s.simple(MSG.ROTATE);
         else if (m.k === 'notifications') s.simple(MSG.EXPAND_NOTIFICATIONS);
         else if (m.k === 'quicksettings') s.simple(MSG.EXPAND_SETTINGS);

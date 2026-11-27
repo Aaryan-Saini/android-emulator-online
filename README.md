@@ -83,7 +83,7 @@ flowchart LR
 ## What you need
 
 - **Hardware virtualization.** On Windows, turn it on in the BIOS and enable *Windows Features → Windows Hypervisor Platform*. On Linux you need KVM. On a Mac there's nothing to do.
-- **Memory.** About 5 GB per phone in use, so 16 GB or more is best. On 8 GB, run one phone at a time (`MAX_DEVICES=1`, `WARM_DEVICES=0`).
+- **Memory.** About 4 GB per phone in use (each phone is a 3 GB Android phone), so 16 GB or more is best. On 8 GB, run one phone at a time (`MAX_DEVICES=1`, `WARM_DEVICES=0`).
 - **Disk.** About 15 GB for the Android SDK and the phone snapshot.
 - **Node.js 18 or newer.**
 - **Android SDK** with platform-tools, the emulator, build-tools and an Android 15 *Google APIs* image. The easiest way is [Android Studio](https://developer.android.com/studio) → *Settings → Android SDK*. With the command-line tools:
@@ -107,11 +107,11 @@ Everything works out of the box. To change something, put it in `data/settings.j
 | Setting | Default | What it does |
 | --- | --- | --- |
 | `PORT` | `3000` | Web address port |
-| `MAX_DEVICES` | `2` | Phones that may run at once (about 5 GB of RAM each) |
+| `MAX_DEVICES` | `2` | Phones that may run at once (about 4 GB of RAM each) |
 | `WARM_DEVICES` | `1` | Spare phones kept ready, so a new visitor gets a phone in ~2.5 s instead of ~25 s. Frozen while waiting (`FREEZE_SPARE`) |
 | `SESSION_MINUTES` | `0` | Maximum session length. `0` means no limit |
 | `IDLE_SECONDS` | `120` | Shut a phone down this long after its tab closes |
-| `PAUSE_HIDDEN_SECONDS` | `30` | Freeze a phone whose tab is in the background this long |
+| `PAUSE_HIDDEN_SECONDS` | `60` | A phone whose tab is in the background keeps running this long, so switching back is instant; then it is frozen |
 | `MAX_SESSIONS_PER_IP` | `2` | Phones per visitor |
 | `MAX_UPLOAD_MB` | `1024` | Largest upload |
 | `VIDEO_MAX_SIZE` / `VIDEO_MIN_SIZE` | `1024` / `640` | Stream size limits (long edge, px) |
@@ -146,7 +146,9 @@ For a permanent setup, put it behind a TLS reverse proxy (Caddy, nginx) with Web
 <br>
 
 - `npm start` keeps the server running and restarts it if it stops. Phones keep running across restarts. Stop everything with `Ctrl+C`, then `npm run stop-phones`.
-- `npm run setup -- --force` rebuilds the phone snapshot. Setup tries your graphics card first and falls back to software drawing at 720×1600, which keeps app layouts identical. Force a mode with `--gpu=host` or `--gpu=swiftshader`. `--avd=<name>` builds into a separate profile while phones are running, and Handset switches to it on its next restart.
+- `npm run setup -- --force` rebuilds the phone snapshot. Setup tries your graphics card first and falls back to software drawing. In software mode the screen is 464×1024, the largest size the video is ever sent at, so the CPU draws no pixels nobody sees; apps get the same layout as a Pixel 7 (412×910 dp). Force a mode with `--gpu=host` or `--gpu=swiftshader`, and a screen size with `--screen=WxH@dpi`. `--avd=<name>` builds into a separate profile while phones are running, and Handset switches to it on its next restart.
+- **Light phones for weak PCs:** add a second kind of phone built from Google's slim test image (ATD): `sdkmanager "system-images;android-35;google_atd;x86_64"`, then `npm run setup -- --tag=google_atd --ram=2048 --avd=handset-light --as=light --no-switch`. Visitors then pick **Standard phone** or **Light phone** in the page header (remembered per browser). Measured against the standard phone: 1.4 GB less RAM (about 2.5 GB per phone) and apps start faster. Apps look the same, but a light phone has no status bar, no gesture navigation and no Settings app; Home and Back use the buttons beside the phone, and Handset reopens the app instead of showing the image's empty black home screen. Spare phones are always standard (`DEFAULT_PHONE` changes that).
+- On Windows, run `scripts\defender-exclusions.ps1` once as administrator so Defender stops scanning every file the emulator touches. Phones start faster and their first minute is smoother. `-Off` undoes it.
 - If a phone crashes, its session moves to a fresh phone with the same app, and the crash is logged in `data/logs/crashes.log`. On Windows, run `scripts\enable-crash-dumps.ps1` once as administrator to also record where it crashed.
 
 </details>

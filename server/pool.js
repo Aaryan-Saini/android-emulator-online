@@ -21,12 +21,12 @@ const LOGS = path.join(cfg.DATA, 'logs');
 const DUMPS = path.join(cfg.DATA, 'crash-dumps');
 
 class Device {
-  constructor(slot) {
+  constructor(slot, avd = cfg.AVD) {
     this.slot = slot;
     this.port = cfg.BASE_PORT + slot * 2;
     this.serial = `emulator-${this.port}`;
     this.state = 'booting'; // booting | ready | busy | stopping
-    this.avd = cfg.AVD; // emulator profile it was started from
+    this.avd = avd; // emulator profile it was started from (its kind: see cfg.PHONES)
     this.pid = null; // emulator process
     this.startedAt = Date.now();
     this.missing = 0;
@@ -60,7 +60,10 @@ class DevicePool extends EventEmitter {
     try {
       saved = JSON.parse(fs.readFileSync(REGISTRY, 'utf8'));
     } catch {}
-    for (let slot = 0; slot < cfg.MAX_DEVICES; slot++) {
+    // Also look at slots above MAX_DEVICES: after lowering it, phones still running in those slots are taken over
+    // (their sessions continue), not left running unseen. New phones respect the limit.
+    const slots = Math.max(cfg.MAX_DEVICES, ...saved.map((s) => (Number.isInteger(s.slot) ? s.slot + 1 : 0)));
+    for (let slot = 0; slot < slots; slot++) {
       const serial = `emulator-${cfg.BASE_PORT + slot * 2}`;
       const prev = saved.find((s) => s.serial === serial);
       if (cfg.KEEP_PHONES_ON_RESTART && prev && online.has(serial) && (prev.state === 'busy' || prev.state === 'ready')) {
@@ -170,7 +173,7 @@ class DevicePool extends EventEmitter {
 
   acquire(session) {
     return new Promise((resolve, reject) => {
-      this.waiters.push({ session, resolve, reject });
+      this.waiters.push({ session, resolve, reject, avd: cfg.avdFor(session.phone) });
       this.maintain();
     });
   }
@@ -209,33 +212,64 @@ class DevicePool extends EventEmitter {
     }
   }
 
+  // Phones come in kinds (cfg.PHONES, e.g. standard and light), each its own emulator profile. A waiting visitor
+  // gets a phone of the kind they chose; spares are always of the default kind.
   maintain() {
     if (this.closed) return;
-    while (this.waiters.length) {
-      const device = this.devices.find((d) => d.state === 'ready');
-      if (!device) break;
-      const waiter = this.waiters.shift();
+    for (let i = 0; i < this.waiters.length; ) {
+      const waiter = this.waiters[i];
+      const device = this.devices.find((d) => d.state === 'ready' && d.avd === waiter.avd);
+      if (!device) {
+        i++;
+        continue;
+      }
+      this.waiters.splice(i, 1);
       device.state = 'busy';
       this.setPriority(device, 'PRIORITY_ABOVE_NORMAL');
       // A frozen spare wakes in ~1.5 s; hand it over once it answers.
       this.resume(device).then(() => waiter.resolve(device), () => waiter.resolve(device));
     }
-    const spare = this.devices.filter((d) => d.state === 'booting' || d.state === 'ready').length;
-    let need = this.waiters.length + cfg.WARM_DEVICES - spare;
-    if (Date.now() < this.pausedUntil) need = 0;
-    while (need-- > 0 && this.devices.length < cfg.MAX_DEVICES) this.boot();
-    // More idle phones than wanted (e.g. WARM_DEVICES was lowered, or one was taken over after a restart): shut the
-    // extras down, they only use memory and CPU.
-    const idle = this.devices.filter((d) => d.state === 'ready');
-    let surplus = idle.length - Math.max(0, cfg.WARM_DEVICES) - this.waiters.length;
-    for (const d of idle) {
-      if (surplus-- <= 0) break;
+    if (Date.now() >= this.pausedUntil) {
+      // Phones the waiting visitors need, minus those already starting.
+      const needed = this.waiters.map((w) => w.avd);
+      for (const d of this.devices) {
+        const k = d.state === 'booting' ? needed.indexOf(d.avd) : -1;
+        if (k >= 0) needed.splice(k, 1);
+      }
+      for (const avd of needed) {
+        if (this.devices.length >= cfg.MAX_DEVICES) {
+          // No room: an idle phone of another kind (a spare nobody asked for) makes way. When it is gone,
+          // maintain() runs again and starts the one that is needed.
+          const idle = this.devices.find((d) => d.state === 'ready' && d.avd !== avd);
+          if (idle) {
+            log('pool', `${idle.serial} makes room for a ${this.kindOf(avd)} phone`);
+            this.destroy(idle);
+          }
+          break;
+        }
+        this.boot(avd);
+      }
+      if (!this.waiters.length) {
+        const spares = this.devices.filter((d) => (d.state === 'booting' || d.state === 'ready') && d.avd === cfg.AVD).length;
+        for (let need = cfg.WARM_DEVICES - spares; need > 0 && this.devices.length < cfg.MAX_DEVICES; need--) this.boot(cfg.AVD);
+      }
+    }
+    // Idle phones nobody needs (too many spares, or a spare of another kind): shut them down, they only use
+    // memory and CPU.
+    let keep = Math.max(0, cfg.WARM_DEVICES);
+    for (const d of this.devices.filter((x) => x.state === 'ready')) {
+      if (this.waiters.some((w) => w.avd === d.avd)) continue;
+      if (d.avd === cfg.AVD && keep-- > 0) continue;
       log('pool', `${d.serial} is a spare phone nobody needs; shutting it down`);
       this.destroy(d);
     }
     this.pinCores();
     this.save();
     this.emit('change');
+  }
+
+  kindOf(avd) {
+    return Object.keys(cfg.PHONES).find((k) => cfg.PHONES[k] === avd) || avd;
   }
 
   // ---------- saving CPU and memory ----------
@@ -268,6 +302,9 @@ class DevicePool extends EventEmitter {
     }
     if (!device.a11y || !device.a11y.ready) this.startHelper(device, true); // its helper may have stopped while frozen
     await this.mobileDataOnly(device); // a phone frozen before this setting still has Wi-Fi, which is about to drop
+    // A phone that lives on Wi-Fi (no mobile data): its Wi-Fi drops ~10 s after a wake-up (measured), so reconnect it
+    // now, before it is handed over, rather than letting the app go offline a moment later.
+    if (device.keepWifi) await shell(device.serial, 'svc wifi disable; sleep 1; svc wifi enable', { timeout: 10000 }).catch(() => {});
     // Don't hand the phone over until its internet works, so the app's first request does not fail.
     const net = await this.waitForInternet(device);
     log('pool', `${device.serial} resumed${net}`);
@@ -275,9 +312,22 @@ class DevicePool extends EventEmitter {
     this.save();
   }
 
-  // Wi-Fi off, mobile data on. See PHONE_WIFI in config.js for why.
+  // Wi-Fi off, mobile data on. See PHONE_WIFI in config.js for why. Only when the phone really has a mobile data
+  // network: Google's slim ATD image reports mobile data but never connects it, so Wi-Fi is its only way online
+  // (switching it off there left apps saying "You're offline"); such phones keep Wi-Fi, switched on.
   async mobileDataOnly(device) {
-    if (cfg.PHONE_WIFI || device.wifiOff) return;
+    if (cfg.PHONE_WIFI || device.wifiOff || device.keepWifi) return;
+    let cellular = 0;
+    for (let i = 0; i < 5 && !cellular; i++) {
+      if (i) await sleep(1000);
+      const out = await shell(device.serial, "dumpsys connectivity | grep 'NetworkAgentInfo{' | grep -c 'Transports: CELLULAR'", { timeout: 10000 }).catch(() => '');
+      cellular = Number(out.trim()) || 0;
+    }
+    if (!cellular) {
+      device.keepWifi = true;
+      await shell(device.serial, 'svc wifi enable', { timeout: 10000 }).catch(() => {});
+      return;
+    }
     await shell(device.serial, 'svc wifi disable; svc data enable', { timeout: 10000 }).catch(() => {});
     device.wifiOff = true;
   }
@@ -285,12 +335,14 @@ class DevicePool extends EventEmitter {
   // The phone fetches Android's own connectivity check page (a 204, a few bytes): that proves DNS and the
   // connection out both work. Usually answers on the first try (~0.3 s). Gives up after ~5 s.
   async waitForInternet(device, budgetMs = 5000) {
+    if (device.keepWifi) budgetMs = Math.max(budgetMs, 12000); // Wi-Fi takes ~5 s to connect
     const t0 = Date.now();
     const probe = `printf 'GET /generate_204 HTTP/1.0\\r\\nHost: connectivitycheck.gstatic.com\\r\\n\\r\\n' | timeout 2 nc connectivitycheck.gstatic.com 80 2>/dev/null | head -1`;
     for (let i = 0; Date.now() - t0 < budgetMs; i++) {
       const out = await shell(device.serial, probe, { timeout: 4000 }).catch(() => '');
       if (/ 204\b/.test(out)) return i ? `, internet back after ${((Date.now() - t0) / 1000).toFixed(1)}s` : '';
-      if (i === 1) await shell(device.serial, cfg.PHONE_WIFI ? 'svc wifi enable; svc data enable' : 'svc data enable', { timeout: 5000 }).catch(() => {});
+      // Still offline: reconnect. A phone that lives on Wi-Fi gets its Wi-Fi switched off and on again.
+      if (i === 1) await shell(device.serial, device.keepWifi ? 'svc wifi disable; sleep 1; svc wifi enable' : cfg.PHONE_WIFI ? 'svc wifi enable; svc data enable' : 'svc data enable', { timeout: 8000 }).catch(() => {});
       await sleep(400);
     }
     return ', but its internet is not working yet (is this PC online?)';
@@ -372,14 +424,14 @@ class DevicePool extends EventEmitter {
     return proc.pid;
   }
 
-  boot() {
+  boot(avd = cfg.AVD) {
     const used = new Set(this.devices.map((d) => d.slot));
     let slot = 0;
     while (used.has(slot)) slot++;
-    const device = new Device(slot);
+    const device = new Device(slot, avd);
     this.devices.push(device);
     const args = [
-      '-avd', cfg.AVD,
+      '-avd', device.avd,
       '-port', String(device.port),
       '-read-only',
       '-snapshot', cfg.SNAPSHOT,
@@ -388,7 +440,7 @@ class DevicePool extends EventEmitter {
       '-no-boot-anim',
       ...cfg.emulatorDisplayArgs(),
     ];
-    log('pool', `booting ${device.serial}`);
+    log('pool', `booting ${device.serial} (${this.kindOf(device.avd)})`);
     this.spawnEmulator(args)
       .then((pid) => {
         device.pid = pid;

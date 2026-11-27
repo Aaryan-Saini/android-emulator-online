@@ -2,7 +2,9 @@
 // It tries the fastest graphics mode first (the computer's GPU) and falls back to software rendering.
 //   npm run setup                        create if missing
 //   npm run setup -- --force             rebuild from scratch
-//   npm run setup -- --force --gpu=host  force a graphics mode (host | swiftshader)
+//   npm run setup -- --force --gpu=host  force a graphics mode (host | swiftshader | swangle)
+//   --avd=<name>                         build into a separate profile (switch while phones are running)
+//   --screen=464x1024@180                screen size and density
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -22,15 +24,30 @@ const avdDir = path.join(AVD_HOME, `${AVD}.avd`);
 const PORT = 5598;
 const serial = `emulator-${PORT}`;
 
-// Same layout for apps either way (411 x 914 dp). Software rendering draws 720p to halve the CPU work.
+// Apps see the same layout in every mode (about 412 x 910 dp, a Pixel 7). With software drawing (the CPU draws
+// every pixel) the screen is 464 x 1024: the video sent to browsers is at most 1024 tall (VIDEO_MAX_SIZE), so
+// drawing more pixels than that only costs CPU (720 x 1600 drew 2.4x as many). --screen=WxH@dpi picks another size.
+const SOFTWARE_SCREEN = { w: 464, h: 1024, dpi: 180 };
 const MODES = {
   host: { gpu: 'host', window: 'hidden', features: '-Vulkan', lcd: { w: 1080, h: 2400, dpi: 420 } },
-  swiftshader: { gpu: 'swiftshader_indirect', window: 'none', features: '', lcd: { w: 720, h: 1600, dpi: 280 } },
+  swiftshader: { gpu: 'swiftshader_indirect', window: 'none', features: '', lcd: SOFTWARE_SCREEN },
   // ANGLE on SwiftShader's Vulkan engine (what Chrome uses for software graphics), instead of SwiftShader's older
   // OpenGL ES library, whose generated code crashed phones while apps were drawing.
   // (Plain "swangle": unlike swiftshader_indirect, "swangle_indirect" is not understood and silently falls back.)
-  swangle: { gpu: 'swangle', window: 'none', features: '', lcd: { w: 720, h: 1600, dpi: 280 } },
+  swangle: { gpu: 'swangle', window: 'none', features: '', lcd: SOFTWARE_SCREEN },
 };
+// --ram=<MB> and --cores=<n>: the phone's memory and CPU cores. Default 3 GB and 3 cores: measured against 4 GB and
+// 4 cores (6-core PC, software drawing), app start was the same, scrolling slightly smoother, ~0.9 GB less RAM.
+const RAM_MB = Number((args.find((a) => a.startsWith('--ram=')) || '').slice(6)) || 3072;
+const CORES = Number((args.find((a) => a.startsWith('--cores=')) || '').slice(8)) || 3;
+const API_LEVEL = Number((args.find((a) => a.startsWith('--api=')) || '').slice(6)) || 0;
+const IMAGE_TAG = (args.find((a) => a.startsWith('--tag=')) || '').slice(6);
+// --as=<kind>: offer this profile as a kind of phone visitors can choose, e.g. --as=light (data/emulator.json "phones").
+const AS_KIND = ((args.find((a) => a.startsWith('--as=')) || '').slice(5).match(/^[a-z][\w-]{0,20}$/) || [])[0] || '';
+// --no-switch: build only; keep the default phone as it is.
+const noSwitch = args.includes('--no-switch');
+const screenArg = (args.find((a) => a.startsWith('--screen=')) || '').slice(9).match(/^(\d+)x(\d+)@(\d+)$/);
+if (screenArg) for (const m of Object.values(MODES)) m.lcd = { w: Number(screenArg[1]), h: Number(screenArg[2]), dpi: Number(screenArg[3]) };
 
 function pickSystemImage() {
   const abi = process.arch === 'arm64' ? 'arm64-v8a' : 'x86_64';
@@ -46,12 +63,14 @@ function pickSystemImage() {
   }
   const rank = (t) => (t === 'google_apis' ? 3 : t === 'google_apis_playstore' ? 2 : t === 'default' ? 1 : 0);
   found.sort((a, b) => b.level - a.level || rank(b.tag) - rank(a.tag));
-  return found.find((f) => f.level >= 30 && rank(f.tag) > 0) || null;
+  // --api=<level>: a specific Android version (e.g. 34 for Android 14); default: the newest.
+  // --tag=<image type>: e.g. google_atd, Google's slim test image (no status bar, navigation bar or bundled apps).
+  return found.find((f) => f.level >= 30 && (IMAGE_TAG ? f.tag === IMAGE_TAG : rank(f.tag) > 0) && (!API_LEVEL || f.level === API_LEVEL)) || null;
 }
 
 function writeAvd(img, mode) {
   fs.mkdirSync(avdDir, { recursive: true });
-  const tagName = { google_apis: 'Google APIs', google_apis_playstore: 'Google Play', default: 'Default Android System Image' }[img.tag];
+  const tagName = { google_apis: 'Google APIs', google_apis_playstore: 'Google Play', default: 'Default Android System Image', google_atd: 'Google APIs ATD', aosp_atd: 'AOSP ATD' }[img.tag] || img.tag;
   const config = {
     'PlayStore.enabled': img.tag === 'google_apis_playstore' ? 'yes' : 'no',
     'abi.type': img.abi,
@@ -68,7 +87,7 @@ function writeAvd(img, mode) {
     'hw.camera.back': 'none',
     'hw.camera.front': 'none',
     'hw.cpu.arch': img.abi === 'x86_64' ? 'x86_64' : 'arm64',
-    'hw.cpu.ncore': '4',
+    'hw.cpu.ncore': String(CORES),
     'hw.dPad': 'no',
     'hw.device.manufacturer': 'Google',
     'hw.device.name': 'pixel_7',
@@ -84,7 +103,7 @@ function writeAvd(img, mode) {
     'hw.lcd.width': String(mode.lcd.w),
     'hw.lcd.vsync': '60',
     'hw.mainKeys': 'no',
-    'hw.ramSize': '4096',
+    'hw.ramSize': String(RAM_MB),
     'hw.screen': 'multi-touch',
     'hw.sdCard': 'yes',
     'hw.sensors.orientation': 'yes',
@@ -213,9 +232,21 @@ async function main() {
   const saved = await adb(serial, ['emu', 'avd', 'snapshot', 'save', cfg.SNAPSHOT], { timeout: 180000 });
   if (!/OK/.test(saved.stdout)) throw new Error(`Snapshot failed: ${saved.stdout}`);
   await kill(result);
+  const summary = `${chosen.name} graphics, ${chosen.lcd.w}x${chosen.lcd.h}, ${RAM_MB} MB, ${CORES} cores`;
+  // data/emulator.json: the default profile ("avd") and the kinds of phone visitors can choose ("phones").
+  let current = {};
+  try {
+    current = JSON.parse(fs.readFileSync(cfg.EMULATOR_FILE, 'utf8'));
+  } catch {}
+  const phones = { ...(current.phones || {}) };
+  if (AS_KIND) phones[AS_KIND] = AVD;
+  else if (!noSwitch && Object.keys(phones).length) phones.standard = AVD;
+  const next = noSwitch ? { ...current } : { ...current, avd: AVD, gpu: chosen.gpu, window: chosen.window, features: chosen.features, lcd: chosen.lcd };
+  if (Object.keys(phones).length) next.phones = phones;
   fs.mkdirSync(path.dirname(cfg.EMULATOR_FILE), { recursive: true });
-  fs.writeFileSync(cfg.EMULATOR_FILE, JSON.stringify({ avd: AVD, gpu: chosen.gpu, window: chosen.window, features: chosen.features, lcd: chosen.lcd }, null, 2));
-  console.log(`Done (${chosen.name} graphics, ${chosen.lcd.w}x${chosen.lcd.h}). Start Handset with: npm start`);
+  fs.writeFileSync(cfg.EMULATOR_FILE, JSON.stringify(next, null, 2));
+  if (noSwitch) return console.log(`Built profile "${AVD}" (${summary})${AS_KIND ? ` as the "${AS_KIND}" phone` : ''}. The default phone is unchanged.`);
+  console.log(`Done (${summary}). Start Handset with: npm start`);
 }
 
 main().catch((e) => {

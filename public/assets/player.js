@@ -97,8 +97,14 @@
       }
     },
 
-    // Draw as soon as a frame is decoded (the canvas is "desynchronized", so this skips a compositor frame
-    // where the browser supports it). If the tab is hidden, only the newest frame is kept.
+    // Even pacing: frames often arrive in bursts (two at once, then a gap). Drawn on arrival, the first of a pair
+    // is never seen and the gap after it reads as a stutter. So frames are shown at the pace the phone captured
+    // them (their timestamps), at most one per screen refresh, held back by a few milliseconds at most.
+    // If the tab is hidden, only the newest frame is kept.
+    queue: [],
+    base: null, // arrival time minus capture time of the earliest-arriving recent frame (ms)
+    lastAt: 0,
+    tick: 0,
     output(frame) {
       if (document.hidden) {
         if (this.pending) this.pending.close();
@@ -109,7 +115,36 @@
         this.pending.close();
         this.pending = null;
       }
-      this.draw(frame);
+      const now = performance.now();
+      const offset = now - frame.timestamp / 1000;
+      // After a still screen (no frames), the next frame starts a new timeline; otherwise follow the earliest
+      // arrivals, drifting slowly so a lasting slowdown does not keep every frame late.
+      if (this.base === null || now - this.lastAt > 400 || offset < this.base) this.base = offset;
+      else this.base += (offset - this.base) * 0.02;
+      this.lastAt = now;
+      frame.due = frame.timestamp / 1000 + this.base + 4;
+      this.queue.push(frame);
+      if (!this.tick) this.tick = requestAnimationFrame((t) => this.present(t));
+    },
+
+    present(now) {
+      this.tick = 0;
+      // Of the frames that are due by this refresh, show the newest; the older ones would be covered anyway.
+      let show = null;
+      while (this.queue.length && (this.queue[0].due <= now + 8 || this.queue.length > 3)) {
+        if (show) show.close();
+        show = this.queue.shift();
+      }
+      if (show) this.draw(show);
+      if (this.queue.length) this.tick = requestAnimationFrame((t) => this.present(t));
+    },
+
+    flush() {
+      for (const f of this.queue) f.close();
+      this.queue = [];
+      this.base = null;
+      if (this.tick) cancelAnimationFrame(this.tick);
+      this.tick = 0;
     },
 
     draw(f) {
@@ -138,6 +173,7 @@
     },
 
     close() {
+      this.flush();
       if (this.decoder && this.decoder.state !== 'closed') {
         try {
           this.decoder.close();
@@ -365,10 +401,42 @@
       } catch {}
       sessionStorage.removeItem(storeKey);
     }
-    const { session } = await api(`/api/apps/${appId}/sessions`, { method: 'POST' });
+    const kind = localStorage.getItem(PHONE_KEY);
+    const { session } = await api(`/api/apps/${appId}/sessions${kind ? `?phone=${encodeURIComponent(kind)}` : ''}`, { method: 'POST' });
     sessionStorage.setItem(storeKey, session.id);
     return session.id;
   }
+
+  // ---------- kind of phone (standard, or light: less memory, no status bar) ----------
+  const PHONE_KEY = 'handset.phone';
+  const PHONE_LABELS = {
+    standard: ['Standard phone', 'Full Android 15, looks like a real phone'],
+    light: ['Light phone', 'Uses about 1.4 GB less memory and starts apps faster. No status bar or gesture navigation'],
+  };
+  let phoneNow = null;
+  function renderPhoneKind(msg) {
+    const select = $('phoneKind');
+    const kinds = Array.isArray(msg.phones) ? msg.phones : [];
+    select.hidden = kinds.length < 2 || msg.state === 'ended';
+    if (select.hidden || (msg.phone === phoneNow && select.options.length === kinds.length)) return;
+    phoneNow = msg.phone;
+    select.replaceChildren(
+      ...kinds.map((k) => {
+        const [label, hint] = PHONE_LABELS[k] || [`${k[0].toUpperCase()}${k.slice(1)} phone`, ''];
+        return el('option', { value: k, title: hint, selected: k === msg.phone || undefined }, label);
+      }),
+    );
+    select.value = msg.phone;
+    select.title = (PHONE_LABELS[msg.phone] || [])[1] || '';
+  }
+  $('phoneKind').addEventListener('change', async (e) => {
+    const kind = e.target.value;
+    localStorage.setItem(PHONE_KEY, kind);
+    if (kind === phoneNow) return;
+    toast(`Starting a ${((PHONE_LABELS[kind] || [kind])[0]).toLowerCase()} with your app…`);
+    if (sessionId) await api(`/api/sessions/${sessionId}`, { method: 'DELETE' }).catch(() => {});
+    startNew();
+  });
 
   async function startNew() {
     sessionStorage.removeItem(storeKey);
@@ -417,6 +485,7 @@
           video.reset();
         }
         setState(msg.state, msg);
+        renderPhoneKind(msg);
         if ((msg.account || null) !== currentAccount) {
           currentAccount = msg.account || null;
           renderAccounts();
@@ -542,28 +611,125 @@
   canvas.addEventListener('auxclick', (e) => e.preventDefault());
   canvas.addEventListener('mousedown', (e) => e.button === 1 && e.preventDefault());
 
-  let wheel = null;
+  // Mouse wheel and trackpad scrolling drive a virtual finger that drags the screen. Android then scrolls the way
+  // it does under a real finger: smoothly, pixel by pixel, instead of jumping one "scroll step" per wheel notch.
+  // Wheel notches glide over ~150 ms; trackpad movement is followed 1:1. The finger only goes down after a few
+  // pixels of movement (a tiny nudge must never become a tap) and lifts once scrolling stops, almost at rest, so
+  // the page stops where the wheel left it. A long scroll re-grips the screen like a person flicking again.
+  const glide = {
+    on: false,
+    f: -1,
+    sx: 0, sy: 0, // where the finger went down (0..1 of the screen)
+    tx: 0, ty: 0, // where it should be, relative to that point
+    cx: 0, cy: 0, // where it is now
+    px: 0, py: 0, // movement gathered before the finger goes down
+    ox: 0.5, oy: 0.5, // pointer position
+    ease: 1,
+    lastInput: 0,
+    raf: 0,
+
+    add(e) {
+      const r = canvas.getBoundingClientRect();
+      if (!r.height) return;
+      const unit = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? r.height * 0.85 : 1;
+      // Wheel down moves the content up, which is a finger moving up.
+      const dx = (-e.deltaX * unit) / r.width;
+      const dy = (-e.deltaY * unit) / r.height;
+      [this.ox, this.oy] = point(e);
+      // Notched wheels send big steps (~100 px): glide them. Trackpads send many small ones: follow directly.
+      this.ease = Math.abs(e.deltaY * unit) >= 50 || Math.abs(e.deltaX * unit) >= 50 ? 0.28 : 1;
+      this.lastInput = performance.now();
+      if (!this.on) {
+        this.px += dx;
+        this.py += dy;
+        if (Math.hypot(this.px * r.width, this.py * r.height) < 10) return void this.schedule();
+        if (!this.begin(this.px, this.py)) {
+          this.px = this.py = 0;
+          return;
+        }
+        this.tx += this.px;
+        this.ty += this.py;
+        this.px = this.py = 0;
+      } else {
+        this.tx += dx;
+        this.ty += dy;
+      }
+      this.schedule();
+    },
+
+    // Put the finger down under the pointer, unless that leaves too little room to move in this direction.
+    begin(dx, dy) {
+      if (fingers.size) return false; // a real finger or mouse drag is in progress
+      const f = freeFinger();
+      if (f < 0) return false;
+      const room = (p, d) => (d < 0 ? p - 0.03 : 0.97 - p);
+      this.sx = room(this.ox, dx) >= 0.35 || Math.abs(dx) < 1e-6 ? Math.min(0.95, Math.max(0.05, this.ox)) : dx < 0 ? 0.7 : 0.3;
+      this.sy = room(this.oy, dy) >= 0.35 || Math.abs(dy) < 1e-6 ? Math.min(0.95, Math.max(0.05, this.oy)) : dy < 0 ? 0.72 : 0.28;
+      this.f = f;
+      this.on = true;
+      this.tx = this.ty = this.cx = this.cy = 0;
+      fingers.set('glide', f);
+      touch(0, f, this.sx, this.sy);
+      return true;
+    },
+
+    end() {
+      if (!this.on) return;
+      touch(1, this.f, this.sx + this.cx, this.sy + this.cy);
+      fingers.delete('glide');
+      this.on = false;
+    },
+
+    schedule() {
+      if (!this.raf) this.raf = requestAnimationFrame(() => this.step());
+    },
+
+    step() {
+      this.raf = 0;
+      const idle = performance.now() - this.lastInput;
+      if (!this.on) {
+        // Movement too small to start a drag: forget it once the wheel has been still for a moment.
+        if (idle > 150) this.px = this.py = 0;
+        else this.schedule();
+        return;
+      }
+      this.cx += (this.tx - this.cx) * this.ease;
+      this.cy += (this.ty - this.cy) * this.ease;
+      if (Math.abs(this.tx - this.cx) < 0.0005) this.cx = this.tx;
+      if (Math.abs(this.ty - this.cy) < 0.0005) this.cy = this.ty;
+      let x = this.sx + this.cx;
+      let y = this.sy + this.cy;
+      // Out of room: lift and put the finger down again, carrying over the distance still to go.
+      if (x < 0.02 || x > 0.98 || y < 0.02 || y > 0.98) {
+        const restX = this.tx - this.cx;
+        const restY = this.ty - this.cy;
+        this.cx = Math.max(0.02, Math.min(0.98, x)) - this.sx;
+        this.cy = Math.max(0.02, Math.min(0.98, y)) - this.sy;
+        this.end();
+        if (this.begin(restX, restY)) {
+          this.tx = restX;
+          this.ty = restY;
+          this.schedule();
+        }
+        return;
+      }
+      touch(2, this.f, x, y);
+      const settled = this.cx === this.tx && this.cy === this.ty;
+      if (settled && idle > 90) return this.end();
+      this.schedule();
+    },
+  };
   canvas.addEventListener(
     'wheel',
     (e) => {
       e.preventDefault();
       if (!live()) return;
-      const [x, y] = point(e);
-      const k = e.deltaMode === 1 ? 1 / 3 : e.deltaMode === 2 ? 3 : 1 / 100;
-      if (!wheel) {
-        wheel = { x, y, h: 0, v: 0 };
-        requestAnimationFrame(() => {
-          send({ t: 'scroll', x: wheel.x, y: wheel.y, h: wheel.h, v: wheel.v });
-          wheel = null;
-        });
-      }
-      wheel.x = x;
-      wheel.y = y;
-      wheel.h += -e.deltaX * k;
-      wheel.v += -e.deltaY * k;
+      glide.add(e);
     },
     { passive: false },
   );
+  // A real touch or click takes over from a wheel glide.
+  canvas.addEventListener('pointerdown', () => glide.end(), true);
 
   const KEYS = {
     Backspace: 67, Delete: 112, Enter: 66, Tab: 61, Escape: 4,

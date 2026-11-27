@@ -57,6 +57,16 @@ try {
 } catch {}
 if (process.env.EMULATOR_GPU) emulatorMode.gpu = process.env.EMULATOR_GPU;
 
+// Kinds of phone visitors can choose between, each its own emulator profile, from data/emulator.json "phones",
+// e.g. { "standard": "handset-3g3c", "light": "handset-atd" }. Without it there is one kind: the profile in "avd".
+const PHONES = process.env.HANDSET_AVD
+  ? { standard: process.env.HANDSET_AVD }
+  : emulatorMode.phones && typeof emulatorMode.phones === 'object' && Object.keys(emulatorMode.phones).length
+    ? emulatorMode.phones
+    : { standard: emulatorMode.avd || 'handset-base' };
+const DEFAULT_PHONE = PHONES[env('DEFAULT_PHONE', 'standard')] ? env('DEFAULT_PHONE', 'standard') : Object.keys(PHONES)[0];
+const phoneKind = (kind) => (PHONES[kind] ? kind : DEFAULT_PHONE);
+
 function emulatorDisplayArgs(mode = emulatorMode) {
   return [
     ...(mode.window === 'hidden' ? ['-qt-hide-window'] : ['-no-window']),
@@ -83,7 +93,12 @@ module.exports = {
   SCRCPY_VERSION: env('SCRCPY_VERSION', '5.0.1'),
 
   // The emulator profile and clean snapshot every session starts from (created by `npm run setup`).
-  AVD: env('HANDSET_AVD', emulatorMode.avd || 'handset-base'),
+  // The default kind's profile; spare phones are always of this kind.
+  AVD: PHONES[DEFAULT_PHONE],
+  PHONES,
+  DEFAULT_PHONE,
+  phoneKind,
+  avdFor: (kind) => PHONES[phoneKind(kind)],
   SNAPSHOT: env('HANDSET_SNAPSHOT', 'handset_clean'),
   EMULATOR_FILE,
   emulatorMode,
@@ -95,8 +110,9 @@ module.exports = {
   // to Windows while they wait (measured: ~0% CPU, ~0 MB RAM in use), and wake in ~1.5 s when someone arrives.
   WARM_DEVICES: num('WARM_DEVICES', 1),
   FREEZE_SPARE: bool('FREEZE_SPARE', true),
-  // Pause a phone (0% CPU) when its tab is hidden this long, or as soon as its tab is closed. It wakes on return.
-  PAUSE_HIDDEN_SECONDS: num('PAUSE_HIDDEN_SECONDS', 30),
+  // While its tab is in the background, a phone keeps running and streaming this long, so switching back is
+  // instant; then it is paused (0% CPU) until the visitor returns. A closed tab pauses it after 3 s.
+  PAUSE_HIDDEN_SECONDS: num('PAUSE_HIDDEN_SECONDS', 60),
   // Switch off apps visitors' apps don't need (YouTube, Gmail, Maps…) on every phone to cut background load.
   STRIP_EXTRAS: bool('STRIP_EXTRAS', true),
   // With 2+ phones busy, give each its own share of CPU cores so they don't interrupt each other.
