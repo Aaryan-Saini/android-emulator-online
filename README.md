@@ -93,6 +93,7 @@ All optional, as environment variables:
 | `PORT` | `3000` | HTTP port |
 | `MAX_DEVICES` | `2` | Phones that may run at once. Each uses about 5 GB of RAM. |
 | `WARM_DEVICES` | `1` | Spare phones kept booted for the next visitor. With `FREEZE_SPARE` (default `true`) the spare is frozen while it waits (~0% CPU, ~0 MB RAM in use) and wakes in a few seconds |
+| `GUEST_ANGLE` | `true` | Uploaded apps draw through ANGLE inside the phone (OpenGL ES turned into Vulkan) instead of the emulator's SwiftShader OpenGL ES library, which crashed phones. Same app start time and picture |
 | `PHONE_WIFI` | `false` | Phones go online over mobile data. The emulator's Wi-Fi drops ~10 s after a frozen phone wakes (apps say "You're offline"); `true` keeps Wi-Fi on anyway |
 | `SESSION_MINUTES` | `0` | Maximum session length; `0` means no limit |
 | `IDLE_SECONDS` | `120` | Shut a phone down this long after its tab closes |
@@ -109,7 +110,7 @@ All optional, as environment variables:
 
 ## When a phone crashes
 
-The session moves to a fresh phone with the same app (a few seconds), and the crash is written to `data/logs/crashes.log` with Windows' crash record. Crashes seen so far happen inside the code SwiftShader (the software renderer) generates while apps draw; with software rendering, emulator 36.5 always uses that renderer for OpenGL ES. To also see *where* in the emulator it crashed, let Windows keep a small crash dump: run this once from a PowerShell window opened as administrator:
+The session moves to a fresh phone with the same app (a few seconds), and the crash is written to `data/logs/crashes.log` with Windows' crash record. The crashes seen here happened inside the code SwiftShader's OpenGL ES library (the emulator's software renderer) generates while apps draw. With software rendering the emulator always uses that library for OpenGL ES (`-gpu swangle` and `lavapipe` fall back to it on Windows), so uploaded apps instead draw through ANGLE inside the phone, Android's own per-app setting: their OpenGL ES becomes Vulkan, which runs on SwiftShader's newer Vulkan engine (`GUEST_ANGLE`). To also see *where* in the emulator it crashed, let Windows keep a small crash dump: run this once from a PowerShell window opened as administrator:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\enable-crash-dumps.ps1   # add -Off to undo

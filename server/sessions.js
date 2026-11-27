@@ -166,6 +166,7 @@ class SessionManager {
         if (x.state === 'running') {
           Object.assign(s, { state: 'running', signedInAs: x.signedInAs });
           log('session', `${s.id.slice(0, 6)} restored on ${device.serial} after a restart`);
+          if (!device.paused) this.useAngle(s); // phones from before GUEST_ANGLE: from the app's next start
         } else {
           s.state = 'installing';
           resume.push([s, () => this.setup(s)]); // was still installing or opening the app: finish that
@@ -230,6 +231,7 @@ class SessionManager {
     log('session', `${session.id.slice(0, 6)} installed ${app.package} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
     this.setState(session, 'launching', `Opening ${app.name}`);
+    await this.useAngle(session);
     await this.launch(session);
     this.setState(session, 'running');
 
@@ -239,6 +241,15 @@ class SessionManager {
       const png = await screencap(device.serial).catch(() => null);
       store.saveScreenshot(app.id, png);
     }, 9000);
+  }
+
+  // The app draws through ANGLE inside the phone (OpenGL ES turned into Vulkan) instead of through the emulator's
+  // SwiftShader OpenGL ES library, whose generated code kept crashing phones while apps were drawing. Android's own
+  // per-app setting; it applies from the app's next start. Measured: same start time, same picture.
+  async useAngle(session) {
+    const { app, device } = session;
+    if (!cfg.GUEST_ANGLE || !device || !SAFE_NAME.test(app.package)) return;
+    await shell(device.serial, `settings put global angle_gl_driver_selection_pkgs '${app.package}'; settings put global angle_gl_driver_selection_values angle`, { timeout: 10000 }).catch(() => {});
   }
 
   async launch(session) {

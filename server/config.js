@@ -91,6 +91,10 @@ module.exports = {
   STRIP_EXTRAS: bool('STRIP_EXTRAS', true),
   // With 2+ phones busy, give each its own share of CPU cores so they don't interrupt each other.
   PIN_CORES: bool('PIN_CORES', true),
+  // Uploaded apps draw through ANGLE inside the phone (OpenGL ES -> Vulkan) instead of the emulator's SwiftShader
+  // OpenGL ES library, whose generated code crashed phones while apps drew (the emulator offers no other software
+  // OpenGL ES renderer on Windows: -gpu swangle and lavapipe both fall back to it).
+  GUEST_ANGLE: bool('GUEST_ANGLE', true),
   // Phones go online over mobile data instead of the emulator's Wi-Fi. Measured: the emulator's Wi-Fi drops ~10 s
   // after a frozen phone wakes (apps say "You're offline" for ~5 s) and does not come back; mobile data stays up.
   PHONE_WIFI: bool('PHONE_WIFI', false),
