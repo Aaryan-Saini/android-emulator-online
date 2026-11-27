@@ -5,7 +5,17 @@ const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
 const exe = (name) => (process.platform === 'win32' ? `${name}.exe` : name);
-const env = (key, fallback) => (process.env[key] === undefined || process.env[key] === '' ? fallback : process.env[key]);
+const DATA_DIR = path.resolve(process.env.HANDSET_DATA || path.join(ROOT, 'data'));
+// This computer's own settings, without environment variables: data/settings.json, e.g. { "WARM_DEVICES": 0 }.
+// Environment variables still win. (data/ is never committed.)
+let local = {};
+try {
+  local = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'settings.json'), 'utf8')) || {};
+} catch {}
+const env = (key, fallback) => {
+  const v = process.env[key] !== undefined && process.env[key] !== '' ? process.env[key] : local[key];
+  return v === undefined || v === null || v === '' ? fallback : v;
+};
 const num = (key, fallback) => Number(env(key, fallback));
 const bool = (key, fallback) => /^(1|true|yes|on)$/i.test(String(env(key, fallback)));
 
@@ -36,7 +46,7 @@ if (!SDK) {
   process.exit(1);
 }
 
-const DATA = path.resolve(env('HANDSET_DATA', path.join(ROOT, 'data')));
+const DATA = DATA_DIR;
 
 // How phones draw their screen. `npm run setup` picks the fastest mode that works on this machine and
 // saves it here, because a snapshot only loads with the same graphics mode it was saved with.

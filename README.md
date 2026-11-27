@@ -1,155 +1,187 @@
+<div align="center">
+
+<img src="public/assets/favicon.svg" width="64" height="64" alt="">
+
 # Handset
 
-Upload an Android app (`.apk`, `.apks` or `.xapk`) and use it in the browser on a real Android phone. Tap, swipe, scroll, type, rotate. Every visitor gets their own fresh phone, and it is destroyed when they leave.
+**Upload an Android app. Use it in your browser, on a real phone.**
 
-Share the link `/app/<id>` and anyone who opens it gets a new phone with that app installed.
+Tap, swipe, type and switch test accounts in one click.<br>
+Everyone who opens the link gets their own fresh phone.
 
-## Run it on your computer
+<br>
 
-Each person runs their own copy: clone it, set it up once, and it runs on your machine with your own phones, apps and test accounts. Nothing is shared between copies. Uploaded apps, saved accounts and phone data live in `data/`, which stays on your computer and is never committed.
+<img src="docs/screenshot-player.png" alt="Handset in the browser: an Android phone running a gallery app, with a list of test accounts to sign in as on the left" width="100%">
 
-### What you need
+</div>
 
-- **Hardware virtualization** switched on. The phones are Android emulators, and without it they are unusably slow.
-  - Windows: turn on virtualization in the BIOS, then *Windows Features* → **Windows Hypervisor Platform**, and restart.
-  - Linux: KVM (`/dev/kvm` must be usable by your user).
-  - macOS: nothing to do.
-- **Memory:** each phone uses about 5 GB of RAM while in use, so 16 GB or more is recommended. On 8 GB, run one phone at a time (`MAX_DEVICES=1 WARM_DEVICES=0`, see [Settings](#settings)).
-- **Disk:** about 15 GB free for the Android SDK, the system image and the snapshot.
-- **Node.js 18 or newer.**
-- **Android SDK** with platform-tools, the emulator, build-tools (for `aapt2`) and one API 30+ *Google APIs* system image. The easiest way is to install [Android Studio](https://developer.android.com/studio) and add these in *Settings → Android SDK*. With the command-line tools instead:
+<br>
 
-  ```bash
-  sdkmanager "platform-tools" "emulator" "build-tools;35.0.0" "system-images;android-35;google_apis;x86_64"
-  ```
+## What it does
 
-  On an Apple silicon Mac use `system-images;android-35;google_apis;arm64-v8a`. Handset finds the SDK in its usual places (`%LOCALAPPDATA%\Android\Sdk`, `~/Library/Android/sdk`, `~/Android/Sdk`); otherwise set `ANDROID_HOME` to it.
+- **Real Android, in a tab.** Upload an `.apk`, `.apks` or `.xapk` and it opens on an Android 15 phone in the browser. Swipes, flings, long-press, pinch and Android's own gestures all work.
+- **A link anyone can open.** Share `/app/<id>`. Every visitor gets a fresh phone with your app installed, and it is wiped when they leave.
+- **Test accounts in one click.** Save a login for each role (Admin, Front desk…). Visitors switch between them without ever seeing a password.
+- **Light on your computer.** Phones nobody is looking at are frozen (0% CPU), and crashed phones are replaced on their own.
 
-### Start
+<br>
+
+## Get started
+
+You need Node.js 18+, the Android SDK and about 16 GB of RAM. [Details below](#what-you-need).
 
 ```bash
 git clone https://github.com/Aaryan-Saini/handset.git
 cd handset
 npm install
-npm run setup     # once: creates the "handset-base" emulator profile and a clean snapshot (5–10 minutes)
-npm start         # http://localhost:3000
+npm run setup     # once, 5–10 min: builds a clean phone to start from
+npm start         # → http://localhost:3000
 ```
 
-Open [localhost:3000](http://localhost:3000), upload an `.apk`, and the app opens on a phone in the browser. Test accounts for one-click role switching are added from the panel beside the phone. On the computer Handset runs on you can always manage them (see [Test accounts](#test-accounts-switch-roles-in-one-click)).
+Open **[localhost:3000](http://localhost:3000)**, drop in an APK, and your app opens on a phone.
 
-`npm start` runs the server under a small watcher that restarts it if it ever stops. Phones keep running while the server restarts, so open sessions carry on. To shut everything down, stop the server (<kbd>Ctrl</kbd>+<kbd>C</kbd>) and run `npm run stop-phones`. Setup does not touch your other emulator profiles.
+<img src="docs/screenshot-home.png" alt="Handset home page: 'Run any Android app in your browser' with a box to drop an APK" width="100%">
 
-`npm run setup -- --force` rebuilds the snapshot from scratch (stop the server first). Setup tries to draw the phone screen with your graphics card. If that crashes or isn't available it falls back to software rendering at 720×1600, which keeps apps' layout identical (411×914 dp) but halves the CPU work. Force a mode with `--gpu=host`, `--gpu=swiftshader` or `--gpu=swangle` (ANGLE on SwiftShader's Vulkan engine; setup checks the phone really uses it, and refuses if the emulator falls back, as emulator 36.5 on Windows does). `--avd=<name>` builds into a separate emulator profile, so the graphics mode can be changed while phones are running; the server switches to it on its next restart and replaces the waiting spare. The choice is saved in `data/emulator.json`.
+Each person runs their own copy. Your apps, accounts and phones stay on your computer, in `data/`, which is never committed.
+
+<br>
+
+## Using it
+
+**Controls.** Everything works with a mouse, and touch screens work natively.
+
+| | |
+| --- | --- |
+| Tap, swipe, fling | Click, or click and drag |
+| Pinch | Hold `Ctrl` and drag |
+| Back | Right-click or `Esc` |
+| Home | Middle-click, or swipe up from the bottom edge |
+| Type | Just type. `Ctrl+V` pastes into the phone, and text copied on the phone lands on your clipboard |
+
+The bar beside the phone has back, home, recent apps, rotate, screenshot, restart app, clear app data and full screen.
+
+**Test accounts.** Click **+ Add account** beside the phone, give it a name, username and password, then switch roles with one click. Handset signs out, reopens the app, taps through intro screens and fills the sign-in form for you. After the first time, switching back to an account takes a few seconds. Drag accounts to reorder them, and use **Export / Import** to move them between computers. Accounts can be changed on the computer Handset runs on, or in the browser that uploaded the app. Visitors from elsewhere only get the one-click list.
+
+<br>
 
 ## How it works
 
-```text
-browser ──HTTP upload──▶ server ──aapt2──▶ app name, package, icon (data/apps/<id>/)
-browser ──WebSocket────▶ server ──adb────▶ emulator (read-only, booted from snapshot)
-   ▲  H.264 frames            │              │
-   │  ◀────────────────────── scrcpy-server ◀┘   (video out, touch/keys/clipboard in)
-   └─ WebCodecs decoder → <canvas>; pointer events → multi-touch
+```mermaid
+flowchart LR
+  B["Your browser"] -- "touch, keys, clipboard" --> S["Handset server"]
+  S -- "adb" --> P["Android phone<br/>(emulator)"]
+  P -- "H.264 video" --> S
+  S -- "WebSocket" --> B
 ```
 
-- **Phones** (`server/pool.js`): emulators boot with `-read-only -snapshot handset_clean`, so each one starts in 10–15 s from the same clean state and nothing is saved. One spare phone is kept ready but frozen (~0% CPU, its memory handed back to the system), so a new session gets a phone in about 2.5 s. A phone whose tab is hidden or closed is frozen the same way and wakes when the visitor returns. After a session the phone is destroyed. If a phone crashes, its session moves to a fresh phone with the same app.
-- **Sessions** (`server/sessions.js`): queue → install (`adb install`, or `install-multiple` for bundles) → launch → stream. There is no time limit by default: a session lasts while the tab is open, and ends when the visitor clicks *End session* or `IDLE_SECONDS` after the tab closes. A page refresh reconnects to the same phone.
-- **Streaming** (`server/scrcpy.js`): runs the bundled scrcpy-server 5.0.1 on the phone and forwards its H.264 stream over the WebSocket. Each browser asks for exactly the resolution it displays (and asks again on full screen), because the phone's video encoder shares the CPU with the app. If a visitor's connection falls behind, frames are dropped up to the next keyframe so lag never builds up.
-- **CPU priority**: the phone someone is using runs at above-normal priority, and spare phones waiting for the next visitor run below normal.
-- **Input** (`public/assets/player.js`): real touch events with up to 9 fingers, so Android's own gestures work: swipe up for home, swipe in from the edge for back, flings, long-press. On a phone or tablet the stream fills the screen and multi-touch works natively.
+- **Phones** are Android emulators that start read-only from one clean snapshot in 15–30 seconds, so every visitor gets the same fresh phone and nothing is kept.
+- **Video** comes from [scrcpy](https://github.com/Genymobile/scrcpy) on the phone and is decoded in the browser with WebCodecs. Each browser gets exactly the size it shows, and late frames are dropped so lag never builds up.
+- **Sign-in** uses Android's accessibility layer to read the screen and fill fields, the way a password manager does.
 
-### Controls on a computer
+<br>
 
-| Action | How |
-| --- | --- |
-| Tap / swipe / fling | Click, or click and drag |
-| Pinch / zoom | Hold <kbd>Ctrl</kbd> and drag |
-| Back | Right-click, <kbd>Esc</kbd>, or swipe in from the left edge |
-| Home | Middle-click, the circle button, or swipe up from the bottom edge |
-| Type | Just type; <kbd>Ctrl</kbd>+<kbd>V</kbd> pastes your clipboard into the phone |
-| Copy out | Text copied on the phone lands on your clipboard |
-| Scroll | Mouse wheel or trackpad |
+## What you need
 
-The frame's side buttons are clickable (power, volume up/down). The toolbar also has rotate, screenshot (full resolution PNG), restart app, clear app data and full screen.
+- **Hardware virtualization.** On Windows, turn it on in the BIOS and enable *Windows Features → Windows Hypervisor Platform*. On Linux you need KVM. On a Mac there's nothing to do.
+- **Memory.** About 5 GB per phone in use, so 16 GB or more is best. On 8 GB, run one phone at a time (`MAX_DEVICES=1`, `WARM_DEVICES=0`).
+- **Disk.** About 15 GB for the Android SDK and the phone snapshot.
+- **Node.js 18 or newer.**
+- **Android SDK** with platform-tools, the emulator, build-tools and an Android 15 *Google APIs* image. The easiest way is [Android Studio](https://developer.android.com/studio) → *Settings → Android SDK*. With the command-line tools:
 
-## Test accounts (switch roles in one click)
+  ```bash
+  sdkmanager "platform-tools" "emulator" "build-tools;35.0.0" "system-images;android-35;google_apis;x86_64"
+  ```
 
-Save a login for each role of an app (for example *Admin* and *Front desk*) with **+ Add account** in the panel beside the phone. Drag accounts up or down to reorder them (or <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd>). **Export** / **Import** move them between apps or computers as a file (it contains the passwords). Anyone who opens the app's link then gets the **Sign in as** list and can switch roles in one click. They never see the passwords. Accounts can be added or changed from any browser on the computer Handset runs on (`http://localhost`), or from the browser that uploaded the app; visitors from other machines cannot. They are stored in `data/apps/<id>/meta.json`.
+  On an Apple silicon Mac use `system-images;android-35;google_apis;arm64-v8a`. Handset finds the SDK in its usual place, or set `ANDROID_HOME`.
 
-What happens on **Sign in as** (`server/autologin.js`):
-
-1. The app is signed out by clearing its data, its permissions are granted up front, and it is reopened.
-2. Handset reads the screen with uiautomator and taps through intro and consent screens (*Continue*, *Next*, *Get started*, *I understand*…) and any permission prompts.
-3. The saved fields are typed **in order**. Plain values go into normal text fields and hidden values only into password fields. For a multi-step login, list the fields in the order the app asks for them, for example *Organisation code → Email → Password*. If a screen offers *Login with Password* next to a code/OTP login and the account has a password, Handset switches to the password login.
-4. Handset presses the app's own button (*Sign in*, *Log in*, *Continue*…), then checks the sign-in screen is gone. If the app shows an error ("invalid password"…), that message is shown to the visitor.
-
-Each account row also has **Type** links: tap a field on the phone, then click *Email* or *Password* to type that saved value into it, for apps the automation cannot follow. One-time codes (OTP, 2FA) cannot be automated; Handset stops and says so.
+<br>
 
 ## Settings
 
-All optional, as environment variables:
+Everything works out of the box. To change something, put it in `data/settings.json` (stays on your computer), for example `{ "WARM_DEVICES": 0 }`, or set it as an environment variable. Then restart.
 
-| Variable | Default | Meaning |
+<details>
+<summary><b>All settings</b></summary>
+<br>
+
+| Setting | Default | What it does |
 | --- | --- | --- |
-| `PORT` | `3000` | HTTP port |
-| `MAX_DEVICES` | `2` | Phones that may run at once. Each uses about 5 GB of RAM. |
-| `WARM_DEVICES` | `1` | Spare phones kept booted for the next visitor. With `FREEZE_SPARE` (default `true`) the spare is frozen while it waits (~0% CPU, ~0 MB RAM in use) and wakes in a few seconds |
-| `GUEST_ANGLE` | `true` | Uploaded apps draw through ANGLE inside the phone (OpenGL ES turned into Vulkan) instead of the emulator's SwiftShader OpenGL ES library, which crashed phones. Same app start time and picture |
-| `PHONE_WIFI` | `false` | Phones go online over mobile data. The emulator's Wi-Fi drops ~10 s after a frozen phone wakes (apps say "You're offline"); `true` keeps Wi-Fi on anyway |
-| `SESSION_MINUTES` | `0` | Maximum session length; `0` means no limit |
+| `PORT` | `3000` | Web address port |
+| `MAX_DEVICES` | `2` | Phones that may run at once (about 5 GB of RAM each) |
+| `WARM_DEVICES` | `1` | Spare phones kept ready, so a new visitor gets a phone in ~2.5 s instead of ~25 s. Frozen while waiting (`FREEZE_SPARE`) |
+| `SESSION_MINUTES` | `0` | Maximum session length. `0` means no limit |
 | `IDLE_SECONDS` | `120` | Shut a phone down this long after its tab closes |
-| `MAX_SESSIONS_PER_IP` | `2` | Concurrent phones per visitor |
-| `MAX_UPLOAD_MB` | `1024` | Upload size limit |
-| `VIDEO_MAX_SIZE` / `VIDEO_MIN_SIZE` | `1024` / `640` | Bounds for the per-viewer stream size (long edge, px). While scrolling on a 6-core i5: 720 → 43 fps, 1024 → 37 fps, 1600 → 21 fps |
+| `PAUSE_HIDDEN_SECONDS` | `30` | Freeze a phone whose tab is in the background this long |
+| `MAX_SESSIONS_PER_IP` | `2` | Phones per visitor |
+| `MAX_UPLOAD_MB` | `1024` | Largest upload |
+| `VIDEO_MAX_SIZE` / `VIDEO_MIN_SIZE` | `1024` / `640` | Stream size limits (long edge, px) |
 | `VIDEO_BITRATE` | `8000000` | Video bitrate |
-| `GRANT_PERMISSIONS` | `false` | `true` grants every runtime permission at install (skips permission prompts) |
-| `FAST_FILL` | `true` | Fill sign-in fields instantly through the accessibility helper in `vendor/appium-uia2` (falls back to typing) |
-| `LOCAL_ADMIN` | `true` | Anyone using Handset on the computer it runs on (`http://localhost`) can add and change every app's accounts, from any browser. Visitors from other machines or through a tunnel still need the uploader's browser |
-| `KEEP_PHONES_ON_RESTART` | `true` | Phones and sessions keep running while the server restarts; visitors reconnect automatically. `npm run stop-phones` stops them |
-| `TRUST_PROXY` | unset | Set when behind a reverse proxy so per-visitor limits use `X-Forwarded-For` |
+| `GRANT_PERMISSIONS` | `false` | Grant every permission at install, skipping permission prompts |
+| `FAST_FILL` | `true` | Fill sign-in fields instantly, falling back to typing |
+| `LOCAL_ADMIN` | `true` | Anyone on the computer Handset runs on can manage every app's accounts |
+| `GUEST_ANGLE` | `true` | Apps draw through ANGLE inside the phone (smoother, and avoids a renderer that crashed phones) |
+| `PHONE_WIFI` | `false` | Phones go online over mobile data, which stays connected after a phone wakes up |
+| `KEEP_PHONES_ON_RESTART` | `true` | Phones and sessions survive a server restart |
+| `TRUST_PROXY` | unset | Set when behind a reverse proxy |
 | `ANDROID_HOME` | auto | Android SDK location |
 
-## When a phone crashes
+</details>
 
-The session moves to a fresh phone with the same app (a few seconds), and the crash is written to `data/logs/crashes.log` with Windows' crash record. The crashes seen here happened inside the code SwiftShader's OpenGL ES library (the emulator's software renderer) generates while apps draw. With software rendering the emulator always uses that library for OpenGL ES (`-gpu swangle` and `lavapipe` fall back to it on Windows), so uploaded apps instead draw through ANGLE inside the phone, Android's own per-app setting: their OpenGL ES becomes Vulkan, which runs on SwiftShader's newer Vulkan engine (`GUEST_ANGLE`). To also see *where* in the emulator it crashed, let Windows keep a small crash dump: run this once from a PowerShell window opened as administrator:
+<details>
+<summary><b>Letting other people use it</b></summary>
+<br>
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\enable-crash-dumps.ps1   # add -Off to undo
-```
-
-Each crash then adds the library it happened in and the libraries on the crashing thread's stack to `crashes.log`. `node server/crashinfo.js` explains the newest dump in `data/crash-dumps` again.
-
-## Letting other people use it
-
-Browsers only decode video on HTTPS pages (or on `localhost`), so people on other machines need an `https://` address. The quickest way:
+Browsers only decode video on `https://` pages (or `localhost`), so other people need an HTTPS address. The quickest way:
 
 ```bash
 cloudflared tunnel --url http://localhost:3000
 ```
 
-For a permanent setup, put it behind any TLS reverse proxy (Caddy, nginx) with WebSocket support and set `TRUST_PROXY=1`. For more than a couple of phones at once, run it on a Linux server with KVM. That is also where Android emulators run fastest.
+For a permanent setup, put it behind a TLS reverse proxy (Caddy, nginx) with WebSocket support and set `TRUST_PROXY=1`. For more than a couple of phones at once, use a Linux server with KVM. Anyone with the address can upload an app and get a phone with internet access, so add a login in front of a public address.
 
-Anyone with access can upload an app and get a phone with internet access. If the address is public, add a login in front of it.
+</details>
 
-## Limits
+<details>
+<summary><b>Phone setup, graphics and crashes</b></summary>
+<br>
 
-- Android only. iOS apps cannot run outside Apple's simulator on a Mac.
-- No sound yet. scrcpy can capture audio (Opus) and the browser can decode it; that is the next thing to add.
-- `.aab` files must be turned into an APK or a universal `.apks` first (bundletool). OBB expansion files inside `.xapk` are ignored.
-- The phones are emulators (Google APIs image, no Play Store). Apps that refuse to run on emulators or need the Play Store will behave as they would on any emulator. Apps with only ARM code run through the emulator's ARM translation.
-- No camera on the phone.
+- `npm start` keeps the server running and restarts it if it stops. Phones keep running across restarts. Stop everything with `Ctrl+C`, then `npm run stop-phones`.
+- `npm run setup -- --force` rebuilds the phone snapshot. Setup tries your graphics card first and falls back to software drawing at 720×1600, which keeps app layouts identical. Force a mode with `--gpu=host` or `--gpu=swiftshader`. `--avd=<name>` builds into a separate profile while phones are running, and Handset switches to it on its next restart.
+- If a phone crashes, its session moves to a fresh phone with the same app, and the crash is logged in `data/logs/crashes.log`. On Windows, run `scripts\enable-crash-dumps.ps1` once as administrator to also record where it crashed.
 
-## Files
+</details>
+
+<details>
+<summary><b>Limits</b></summary>
+<br>
+
+- Android only. iOS apps can't run outside Apple's simulator on a Mac.
+- No sound yet.
+- `.aab` files must be turned into an APK or `.apks` first (bundletool). OBB files in `.xapk` are ignored.
+- The phones are emulators with Google APIs but no Play Store, and no camera. Apps that refuse emulators or need the Play Store behave as they would on any emulator.
+
+</details>
+
+<details>
+<summary><b>Project layout</b></summary>
+<br>
 
 ```text
-server/index.js     HTTP routes, static files, WebSocket upgrade
-server/pool.js      emulator pool (boot, hand out, freeze/wake, destroy)
-server/crashinfo.js explains phone crashes (Windows crash record, crash dump reader)
-server/sessions.js  session lifecycle, install/launch, browser ↔ phone bridge
-server/scrcpy.js    scrcpy-server launcher, stream parser, control messages
-server/apk.js       aapt2 parsing, adaptive icon extraction, bundle unpacking
-server/zip.js       small ZIP reader
-server/store.js     uploaded apps (data/apps/<id>/)
-public/             home page, player page, styles, scripts
-scripts/setup.js    creates the emulator profile and clean snapshot
-vendor/             scrcpy-server 5.0.1 (Apache 2.0, see scrcpy-LICENSE.txt)
+server/index.js      web server, routes, WebSocket
+server/pool.js       phones: start, hand out, freeze, wake, replace
+server/sessions.js   one visitor's phone: install, launch, stream, sign in
+server/autologin.js  reads the screen and fills sign-in forms
+server/scrcpy.js     video stream and touch/keyboard input
+server/apk.js        reads app name, icon and package from uploads
+server/store.js      uploaded apps and their test accounts (data/apps/)
+server/crashinfo.js  explains phone crashes
+public/              home page and phone page
+scripts/setup.js     builds the clean phone snapshot
+vendor/              scrcpy-server, accessibility helper, test photos
 ```
+
+</details>
+
+<br>
+
+<sub>Built on [scrcpy](https://github.com/Genymobile/scrcpy) (Apache 2.0) and the [Appium UiAutomator2 server](https://github.com/appium/appium-uiautomator2-server) (Apache 2.0). Test photos are public domain (CC0, see `vendor/test-media/CREDITS.md`). The screenshot shows [Fossify Gallery](https://github.com/FossifyOrg/Gallery).</sub>
